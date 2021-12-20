@@ -1,17 +1,25 @@
 import asyncio
+import json
 import logging
+import math
 import os
 from contextlib import suppress
-from json import dump
 from pathlib import Path
 from typing import Iterable, Any
 
+import aiofiles
 from babel import Locale
 from jinja2 import Environment, TemplateNotFound
 
 from betty.json import JSONEncoder
 from betty.openapi import build_specification
 from betty.app import App
+
+try:
+    from resource import getrlimit, RLIMIT_NOFILE
+    _GENERATE_CONCURRENCY = math.ceil(getrlimit(RLIMIT_NOFILE)[0] / 2)
+except ImportError:
+    _GENERATE_CONCURRENCY = 999
 
 
 def getLogger() -> logging.Logger:
@@ -24,10 +32,10 @@ class Generator:
 
 
 async def generate(app: App) -> None:
-    await asyncio.gather(*[
+    await asyncio.gather(
         _generate(app),
         app.dispatcher.dispatch(Generator, 'generate')(),
-    ])
+    )
     os.chmod(app.configuration.output_directory_path, 0o755)
     for directory_path_str, subdirectory_names, file_names in os.walk(app.configuration.output_directory_path):
         directory_path = Path(directory_path_str)
@@ -52,36 +60,43 @@ async def _generate(app: App) -> None:
             await app.assets.copytree(Path('public') / 'localized', www_directory_path)
             await app.renderer.render_tree(www_directory_path)
 
+            coroutines = [
+                *[
+                    coroutine
+                    for entities, entity_type_name in [
+                        (app.ancestry.files, 'file'),
+                        (app.ancestry.people, 'person'),
+                        (app.ancestry.places, 'place'),
+                        (app.ancestry.events, 'event'),
+                        (app.ancestry.citations, 'citation'),
+                        (app.ancestry.sources, 'source'),
+                    ]
+                    async for coroutine in _generate_entity_type(www_directory_path, entities, entity_type_name, app, locale, app.jinja2_environment)
+                ],
+                _generate_entity_type_list_json(www_directory_path, app.ancestry.notes, 'note', app),
+                *[
+                    _generate_entity_json(www_directory_path, note, 'note', app, locale)
+                    for note in app.ancestry.notes
+                ],
+                _generate_openapi(www_directory_path, app)
+            ]
+            # Batch all coroutines to reduce the risk of "too many open files" errors.
+            for i in range(0, len(coroutines), _GENERATE_CONCURRENCY):
+                await asyncio.gather(*coroutines[i:i + _GENERATE_CONCURRENCY])
             locale_label = Locale.parse(locale, '-').get_display_name()
-            await _generate_entity_type(www_directory_path, app.ancestry.files, 'file', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d files in %s.' %
-                        (len(app.ancestry.files), locale_label))
-            await _generate_entity_type(www_directory_path, app.ancestry.people, 'person', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d people in %s.' %
-                        (len(app.ancestry.people), locale_label))
-            await _generate_entity_type(www_directory_path, app.ancestry.places, 'place', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d places in %s.' %
-                        (len(app.ancestry.places), locale_label))
-            await _generate_entity_type(www_directory_path, app.ancestry.events, 'event', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d events in %s.' %
-                        (len(app.ancestry.events), locale_label))
-            await _generate_entity_type(www_directory_path, app.ancestry.citations, 'citation', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d citations in %s.' %
-                        (len(app.ancestry.citations), locale_label))
-            await _generate_entity_type(www_directory_path, app.ancestry.sources, 'source', app, locale, app.jinja2_environment)
-            logger.info('Generated pages for %d sources in %s.' %
-                        (len(app.ancestry.sources), locale_label))
-            _generate_entity_type_list_json(www_directory_path, app.ancestry.notes, 'note', app)
-            for note in app.ancestry.notes:
-                _generate_entity_json(www_directory_path, note, 'note', app, locale)
-            logger.info('Generated pages for %d notes in %s.' % (len(app.ancestry.notes), locale_label))
-            _generate_openapi(www_directory_path, app)
-            logger.info('Generated OpenAPI documentation in %s.', locale_label)
+            logger.info(f'Generated pages for {len(app.ancestry.files)} files in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.people)} in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.places)} in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.events)} in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.citations)} in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.sources)} in {locale_label}.')
+            logger.info(f'Generated pages for %d {len(app.ancestry.notes)} in {locale_label}.')
+            logger.info(f'Generated OpenAPI documentation in {locale_label}.')
 
 
 def _create_file(path: Path) -> object:
     path.parent.mkdir(exist_ok=True, parents=True)
-    return open(path, 'w', encoding='utf-8')
+    return aiofiles.open(path, 'w', encoding='utf-8')
 
 
 def _create_html_resource(path: Path) -> object:
@@ -93,14 +108,28 @@ def _create_json_resource(path: Path) -> object:
 
 
 async def _generate_entity_type(www_directory_path: Path, entities: Iterable[Any], entity_type_name: str, app: App,
-                                locale: str, environment: Environment) -> None:
-    await _generate_entity_type_list_html(
-        www_directory_path, entities, entity_type_name, environment)
-    _generate_entity_type_list_json(
-        www_directory_path, entities, entity_type_name, app)
+                                locale: str, environment: Environment):
+    yield _generate_entity_type_list_html(
+        www_directory_path, entities,
+        entity_type_name,
+        environment,
+    )
+    yield _generate_entity_type_list_json(
+        www_directory_path,
+        entities,
+        entity_type_name,
+        app,
+    )
     for entity in entities:
-        await _generate_entity(www_directory_path, entity,
-                               entity_type_name, app, locale, environment)
+        async for coroutine in _generate_entity(
+            www_directory_path,
+            entity,
+            entity_type_name,
+            app,
+            locale,
+            environment,
+        ):
+            yield coroutine
 
 
 async def _generate_entity_type_list_html(www_directory_path: Path, entities: Iterable[Any], entity_type_name: str,
@@ -109,52 +138,55 @@ async def _generate_entity_type_list_html(www_directory_path: Path, entities: It
     with suppress(TemplateNotFound):
         template = environment.get_template(
             'page/list-%s.html.j2' % entity_type_name)
-        with _create_html_resource(entity_type_path) as f:
-            f.write(template.render({
-                'page_resource': '/%s/index.html' % entity_type_name,
-                'entity_type_name': entity_type_name,
-                'entities': entities,
-            }))
+        rendered_html = template.render({
+            'page_resource': '/%s/index.html' % entity_type_name,
+            'entity_type_name': entity_type_name,
+            'entities': entities,
+        })
+        async with _create_html_resource(entity_type_path) as f:
+            await f.write(rendered_html)
 
 
-def _generate_entity_type_list_json(www_directory_path: Path, entities: Iterable[Any], entity_type_name: str, app: App) -> None:
+async def _generate_entity_type_list_json(www_directory_path: Path, entities: Iterable[Any], entity_type_name: str, app: App) -> None:
     entity_type_path = www_directory_path / entity_type_name
-    with _create_json_resource(entity_type_path) as f:
-        data = {
-            '$schema': app.static_url_generator.generate('schema.json#/definitions/%sCollection' % entity_type_name, absolute=True),
-            'collection': []
-        }
-        for entity in entities:
-            data['collection'].append(app.localized_url_generator.generate(
-                entity, 'application/json', absolute=True))
-        dump(data, f)
+    data = {
+        '$schema': app.static_url_generator.generate('schema.json#/definitions/%sCollection' % entity_type_name, absolute=True),
+        'collection': []
+    }
+    for entity in entities:
+        data['collection'].append(app.localized_url_generator.generate(
+            entity, 'application/json', absolute=True))
+    rendered_json = json.dumps(data)
+    async with _create_json_resource(entity_type_path) as f:
+        await f.write(rendered_json)
 
 
-async def _generate_entity(www_directory_path: Path, entity: Any, entity_type_name: str, app: App, locale: str, environment: Environment) -> None:
-    await _generate_entity_html(www_directory_path, entity,
-                                entity_type_name, environment)
-    _generate_entity_json(www_directory_path, entity,
-                          entity_type_name, app, locale)
+async def _generate_entity(www_directory_path: Path, entity: Any, entity_type_name: str, app: App, locale: str, environment: Environment):
+    yield _generate_entity_html(www_directory_path, entity, entity_type_name, environment)
+    yield _generate_entity_json(www_directory_path, entity, entity_type_name, app, locale)
 
 
 async def _generate_entity_html(www_directory_path: Path, entity: Any, entity_type_name: str, environment: Environment) -> None:
     entity_path = www_directory_path / entity_type_name / entity.id
-    with _create_html_resource(entity_path) as f:
-        f.write(environment.get_template('page/%s.html.j2' % entity_type_name).render({
-            'page_resource': entity,
-            'entity_type_name': entity_type_name,
-            entity_type_name: entity,
-        }))
+    rendered_html = environment.get_template('page/%s.html.j2' % entity_type_name).render({
+        'page_resource': entity,
+        'entity_type_name': entity_type_name,
+        entity_type_name: entity,
+    })
+    async with _create_html_resource(entity_path) as f:
+        await f.write(rendered_html)
 
 
-def _generate_entity_json(www_directory_path: Path, entity: Any, entity_type_name: str, app: App, locale: str) -> None:
+async def _generate_entity_json(www_directory_path: Path, entity: Any, entity_type_name: str, app: App, locale: str) -> None:
     entity_path = www_directory_path / entity_type_name / entity.id
-    with _create_json_resource(entity_path) as f:
-        dump(entity, f, cls=JSONEncoder.get_factory(app, locale))
+    rendered_json = json.dumps(entity, cls=JSONEncoder.get_factory(app, locale))
+    async with _create_json_resource(entity_path) as f:
+        await f.write(rendered_json)
 
 
-def _generate_openapi(www_directory_path: Path, app: App) -> None:
+async def _generate_openapi(www_directory_path: Path, app: App) -> None:
     api_directory_path = www_directory_path / 'api'
     api_directory_path.mkdir(exist_ok=True, parents=True)
-    with open(api_directory_path / 'index.json', 'w', encoding='utf-8') as f:
-        dump(build_specification(app), f)
+    rendered_json = json.dumps(build_specification(app))
+    async with _create_json_resource(api_directory_path) as f:
+        await f.write(rendered_json)

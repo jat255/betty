@@ -39,6 +39,7 @@ SETUP = {
     ],
     'python_requires': '~= 3.7',
     'install_requires': [
+        'aiofiles ~= 0.8.0',
         'aiohttp ~= 3.7',
         'babel ~= 2.9',
         'click ~= 8.0.1',

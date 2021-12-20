@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Tuple, Optional, List, Any, Dict, Union
 from xml.etree import ElementTree
 
+import aiofiles
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QFormLayout, QPushButton, QFileDialog, QLineEdit, QHBoxLayout, QVBoxLayout, \
     QGridLayout
@@ -34,7 +35,7 @@ class GrampsLoadFileError(UserFacingError):
     pass
 
 
-def load_file(ancestry: Ancestry, file_path: PathLike) -> None:
+async def load_file(ancestry: Ancestry, file_path: PathLike) -> None:
     file_path = Path(file_path)
     logger = getLogger()
     logger.info('Loading %s...' % str(file_path))
@@ -48,8 +49,8 @@ def load_file(ancestry: Ancestry, file_path: PathLike) -> None:
         return
 
     with suppress(GrampsLoadFileError):
-        with open(file_path) as f:
-            xml = f.read()
+        async with aiofiles.open(file_path) as f:
+            xml = await f.read()
         load_xml(ancestry, xml, file_path.anchor)
         return
 
@@ -664,7 +665,7 @@ class Gramps(ConfigurableExtension, Loader, GuiBuilder):
 
     async def load(self) -> None:
         for family_tree in self._configuration.family_trees:
-            load_file(self._app.ancestry, family_tree.file_path)
+            await load_file(self._app.ancestry, family_tree.file_path)
 
     @classmethod
     def gui_name(cls) -> str:
