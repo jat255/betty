@@ -224,7 +224,7 @@ class Wikipedia(Extension, Jinja2Provider, PostLoader, GuiBuilder):
     @pass_context
     def _filter_wikipedia_links(self, context, links: Iterable[Link]) -> Iterable[Entry]:
         locale = parse_locale(context.resolve_or_missing('locale'), '-')[0]
-        futures = [self._app.executor.submit(self._filter_wikipedia_link, locale, link) for link in links]
+        futures = [self._app.do_in_thread(self._filter_wikipedia_link(locale, link)) for link in links]
         return filter(None, [future.result() for future in as_completed(futures)])
 
     @sync

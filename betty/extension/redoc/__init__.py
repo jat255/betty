@@ -30,7 +30,7 @@ class ReDoc(Extension, Generator, GuiBuilder):
             shutil.copytree(self.assets_directory_path / 'js', build_directory_path)
         await self._app.renderer.render_tree(build_directory_path)
 
-        self._app.executor.submit(_do_render, build_directory_path, self._app.configuration.www_directory_path)
+        await self._app.do_in_thread(_do_render(build_directory_path, self._app.configuration.www_directory_path))
 
     @classmethod
     def gui_name(cls) -> str:

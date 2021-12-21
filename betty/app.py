@@ -1,5 +1,8 @@
+import asyncio
 import gettext
+from asyncio import Future
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures._base import Executor
 from concurrent.futures.thread import ThreadPoolExecutor
 from contextlib import AsyncExitStack
@@ -21,7 +24,7 @@ from betty.lock import Locks
 from betty.render import Renderer, SequentialRenderer
 
 from copy import copy
-from typing import Type, Dict, Sequence, List
+from typing import Type, Dict, Sequence, List, Callable, Any
 
 from betty.ancestry import Ancestry
 from betty.config import Configuration
@@ -78,13 +81,18 @@ class App:
         self._extension_exit_stack = AsyncExitStack()
         self._jinja2_environment = None
         self._renderer = None
-        self._executor = None
+        self._thread_pool = None
+        self._process_pool = None
         self._locks = Locks()
         self._http_client = None
 
     @property
     def configuration(self) -> Configuration:
         return self._configuration
+
+    async def wait(self) -> None:
+        await self._thread_pool.wait()
+        await self._process_pool.wait()
 
     async def enter(self):
         if not self._app_stack:
@@ -94,8 +102,11 @@ class App:
         self._default_translations = Translations(self.translations[self.locale])
         self._default_translations.install()
 
-        if self._executor is None:
-            self._executor = ExceptionRaisingExecutor(ThreadPoolExecutor())
+        if self._thread_pool is None:
+            self._thread_pool = ExceptionRaisingExecutor(ThreadPoolExecutor())
+
+        if self._process_pool is None:
+            self._process_pool = ExceptionRaisingExecutor(ProcessPoolExecutor())
 
         self._app_stack.append(self)
 
@@ -107,8 +118,11 @@ class App:
         self._default_translations.uninstall()
 
         if not self._app_stack:
-            self._executor.shutdown()
-            self._executor = None
+            self._thread_pool.shutdown()
+            self._thread_pool = None
+            # @todo We don't necessarily need to shut down the process pool because it doesn't share memory.
+            self._process_pool.shutdown()
+            self._process_pool = None
 
             if self._http_client is not None:
                 await self._http_client.close()
@@ -242,11 +256,15 @@ class App:
 
         return self._renderer
 
-    @property
-    def executor(self) -> Executor:
-        if self._executor is None:
-            raise RuntimeError("Cannot get the executor before this app's context is entered.")
-        return self._executor
+    async def do_in_thread(self, task: Callable) -> Future[Any]:
+        if self._thread_pool is None:
+            raise RuntimeError("Cannot schedule any threads before this app's context is entered.")
+        return asyncio.get_event_loop().run_in_executor(self._thread_pool, task)
+
+    async def do_in_subprocess(self, task: Callable) -> Future[Any]:
+        if self._process_pool is None:
+            raise RuntimeError("Cannot schedule any processes before this app's context is entered.")
+        return asyncio.get_event_loop().run_in_executor(self._process_pool, task)
 
     @property
     def locks(self) -> Locks:
