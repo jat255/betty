@@ -1,5 +1,6 @@
 import os
 import shutil
+from contextlib import suppress
 from typing import Union
 
 PathLike = Union[str, os.PathLike]
@@ -7,9 +8,11 @@ PathLike = Union[str, os.PathLike]
 
 def link_or_copy(source_path: PathLike, destination_path: PathLike) -> None:
     try:
-        os.link(source_path, destination_path)
+        with suppress(FileExistsError):
+            os.link(source_path, destination_path)
     except OSError:
-        shutil.copyfile(source_path, destination_path)
+        with suppress(shutil.SameFileError):
+            shutil.copyfile(source_path, destination_path)
 
 
 class ChDir:

@@ -324,7 +324,7 @@ def _filter_file(app: App, file: File) -> str:
     with suppress(AcquiredError):
         app.locks.acquire((_filter_file, file))
         file_destination_path = app.configuration.www_directory_path / 'file' / file.id / 'file' / file.path.name
-        app.executor.submit(_do_filter_file, Path(file.path), file_destination_path)
+        app.do_in_thread(lambda: _do_filter_file(Path(file.path), file_destination_path))
 
     return f'/file/{file.id}/file/{file.path.name}'
 
@@ -363,7 +363,7 @@ def _filter_image(app: App, file: File, width: Optional[int] = None, height: Opt
     with suppress(AcquiredError):
         app.locks.acquire((_filter_image, file, width, height))
         cache_directory_path = app.configuration.cache_directory_path / 'image'
-        app.executor.submit(task, Path(file.path), cache_directory_path, file_directory_path, destination_name, width, height)
+        app.do_in_thread(lambda: task(Path(file.path), cache_directory_path, file_directory_path, destination_name, width, height))
 
     destination_public_path = '/file/%s' % destination_name
 

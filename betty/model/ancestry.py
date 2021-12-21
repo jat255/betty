@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import copy
 from functools import total_ordering
 from pathlib import Path
-from typing import List, Optional, Set, Sequence
+from typing import Optional, Set, Sequence, List, Dict
 
 from geopy import Point
 
 from betty.locale import Localized, Datey
 from betty.media_type import MediaType
 from betty.model import many_to_many, Entity, one_to_many, many_to_one, many_to_one_to_many, \
-    MultipleTypesEntityCollection, EntityCollection
+    EntityCollection, MultipleTypesEntityCollection, FlattenedEntityCollection
 from betty.model.event_type import EventType, Birth, Baptism, Death, Burial
 from betty.os import PathLike
 
@@ -427,6 +428,26 @@ class Person(Entity, HasFiles, HasCitations, HasLinks, HasPrivacy):
 class Ancestry:
     def __init__(self):
         self._entities = MultipleTypesEntityCollection()
+
+    def __copy__(self) -> Ancestry:
+        copied = self.__class__()
+        copied.entities.append(*self.entities)
+        return copied
+
+    def __deepcopy__(self, memo: Dict) -> Ancestry:
+        copied = self.__class__()
+        copied.entities.append(*[copy.deepcopy(entity, memo) for entity in self.entities])
+        return copied
+
+    def __getstate__(self) -> FlattenedEntityCollection:
+        entities = FlattenedEntityCollection()
+        entities.add_entity(*self.entities)
+
+        return entities
+
+    def __setstate__(self, state: FlattenedEntityCollection):
+        self.__init__()
+        self._entities.append(*state.unflatten())
 
     @property
     def entities(self) -> MultipleTypesEntityCollection:

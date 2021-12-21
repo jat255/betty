@@ -3,7 +3,6 @@ import hashlib
 import json
 import logging
 import re
-from concurrent.futures import as_completed
 from contextlib import suppress
 from os.path import getmtime
 from pathlib import Path
@@ -245,12 +244,15 @@ class Wikipedia(Extension, Jinja2Provider, PostLoader, GuiBuilder):
         }
 
     @pass_context
-    def _filter_wikipedia_links(self, context, links: Iterable[Link]) -> Iterable[Entry]:
-        locale = parse_locale(context.resolve_or_missing('locale'), '-')[0]
-        futures = [self._app.executor.submit(self._filter_wikipedia_link, locale, link) for link in links]
-        return filter(None, [future.result() for future in as_completed(futures)])
-
     @sync
+    async def _filter_wikipedia_links(self, context, links: Iterable[Link]) -> Iterable[Entry]:
+        locale = parse_locale(context.resolve_or_missing('locale'), '-')[0]
+        return filter(None, await asyncio.gather(*[
+            self._filter_wikipedia_link(locale, link)
+            for link
+            in links
+        ]))
+
     async def _filter_wikipedia_link(self, locale: str, link: Link) -> Optional[Entry]:
         try:
             entry_language, entry_name = _parse_url(link.url)

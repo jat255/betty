@@ -17,7 +17,7 @@ class Index:
             *[self._build_file(file) for file in self._app.ancestry.entities[File]],
         ])
 
-    def _render_entity(self, entity: Entity):
+    def _render_entity(self, entity: Entity) -> str:
         entity_type_name = get_entity_type_name(entity.entity_type())
         return self._app.jinja2_environment.get_template(
             f'search/result-{camel_case_to_kebab_case(entity_type_name)}.html.j2'

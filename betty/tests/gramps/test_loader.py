@@ -107,6 +107,24 @@ class LoadXmlTest(TestCase):
         self.assertEqual(place, event.place)
         self.assertIn(event, place.events)
 
+    def test_place_should_include_enclosed_by(self):
+        ancestry = self._load_partial("""
+<places>
+    <placeobj handle="_e7692ea23775e80643fe4fcf91" change="1552125653" id="P0000" type="Unknown">
+    </placeobj>
+    <placeobj handle="_e2b5e77b4cc5c91c9ed60a6cb39" change="1552125653" id="P0001" type="Unknown">
+    </placeobj>
+    <placeobj handle="_e1dd2fb639e3f04f8cfabaa7e8a" change="1552125653" id="P0002" type="Unknown">
+        <placeref hlink="_e7692ea23775e80643fe4fcf91"/>
+        <placeref hlink="_e2b5e77b4cc5c91c9ed60a6cb39"/>
+    </placeobj>
+</places>
+""")
+        self.assertEquals(ancestry.entities[Place]['P0000'], ancestry.entities[Place]['P0002'].enclosed_by[0].enclosed_by)
+        self.assertEquals(ancestry.entities[Place]['P0001'], ancestry.entities[Place]['P0002'].enclosed_by[1].enclosed_by)
+        self.assertEquals(ancestry.entities[Place]['P0002'], ancestry.entities[Place]['P0000'].encloses[0].encloses)
+        self.assertEquals(ancestry.entities[Place]['P0002'], ancestry.entities[Place]['P0001'].encloses[0].encloses)
+
     def test_person_should_include_name(self):
         person = self.ancestry.entities[Person]['I0000']
         expected = PersonName(person, 'Jane', 'Doe')

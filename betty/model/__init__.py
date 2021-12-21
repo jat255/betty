@@ -457,7 +457,7 @@ class MultipleTypesEntityCollection(EntityCollection[Entity]):
             self.append(entity)
 
     def clear(self) -> None:
-        for collection in self._collections:
+        for collection in self._collections.values():
             collection.clear()
 
     def __add__(self, other) -> MultipleTypesEntityCollection:

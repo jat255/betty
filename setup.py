@@ -43,6 +43,7 @@ SETUP = {
         'aiohttp ~= 3.8.1',
         'babel ~= 2.9.1',
         'click ~= 8.0.3',
+        'dill ~= 0.3.4',
         'geopy ~= 2.2.0',
         'graphlib-backport ~= 1.0; python_version < "3.9"',
         # This is a loose constraint because of conflicts between click 8.0.3 and flake8 4.0.1.
@@ -50,12 +51,11 @@ SETUP = {
         'jinja2 ~= 3.0.1',
         'jsonschema ~= 4.4.0',
         'markupsafe ~= 2.0.1',
-        'orderedset ~= 2.0.3',
         'pdf2image ~= 1.16.0',
         'PyQt6 ~= 6.2.3',
         'python-resize-image ~= 1.1.20',
         'pyyaml ~= 6.0.0',
-        'reactives ~= 0.2.0',
+        'reactives ~= 0.2.1',
     ],
     'extras_require': {
         'development': [

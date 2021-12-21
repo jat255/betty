@@ -1,9 +1,11 @@
+import copy
 from gettext import NullTranslations
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 from unittest.mock import Mock
 
+import dill as pickle
 from geopy import Point
 from parameterized import parameterized
 
@@ -12,24 +14,36 @@ from betty.media_type import MediaType
 from betty.model import Entity
 from betty.model.ancestry import Person, Event, Place, File, Note, Presence, PlaceName, PersonName, Subject, Birth, \
     Enclosure, Described, Dated, HasPrivacy, HasMediaType, Link, HasLinks, HasNotes, HasFiles, Source, Citation, \
-    HasCitations, PresenceRole, Attendee, Beneficiary, Witness, EventType
-from betty.model.event_type import Burial
+    HasCitations, Witness, Beneficiary, Attendee, PresenceRole, Ancestry
+from betty.model.event_type import UnknownEventType, Burial
 from betty.tests import TestCase
 
 
 class HasPrivacyTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = HasPrivacy()
+        pickle.dumps(sut)
+
     def test_date(self) -> None:
         sut = HasPrivacy()
         self.assertIsNone(sut.private)
 
 
 class DatedTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Dated()
+        pickle.dumps(sut)
+
     def test_date(self) -> None:
         sut = Dated()
         self.assertIsNone(sut.date)
 
 
 class NoteTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Note('N1', 'Betty wrote this.')
+        pickle.dumps(sut)
+
     def test_id(self) -> None:
         note_id = 'N1'
         sut = Note(note_id, 'Betty wrote this.')
@@ -45,24 +59,40 @@ class HasNotesTest(TestCase):
     class _HasNotes(HasNotes, Entity):
         pass
 
+    def test_pickle(self) -> None:
+        sut = self._HasNotes()
+        pickle.dumps(sut)
+
     def test_notes(self) -> None:
         sut = self._HasNotes()
         self.assertSequenceEqual([], sut.notes)
 
 
 class DescribedTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Described()
+        pickle.dumps(sut)
+
     def test_description(self) -> None:
         sut = Described()
         self.assertIsNone(sut.description)
 
 
 class HasMediaTypeTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = HasMediaType()
+        pickle.dumps(sut)
+
     def test_media_type(self) -> None:
         sut = HasMediaType()
         self.assertIsNone(sut.media_type)
 
 
 class LinkTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Link('https://example.com')
+        pickle.dumps(sut)
+
     def test_url(self) -> None:
         url = 'https://example.com'
         sut = Link(url)
@@ -95,12 +125,20 @@ class LinkTest(TestCase):
 
 
 class HasLinksTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = HasLinks()
+        pickle.dumps(sut)
+
     def test_links(self) -> None:
         sut = HasLinks()
         self.assertEquals(set(), sut.links)
 
 
 class FileTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = File('BETTY01', Path('~'))
+        pickle.dumps(sut)
+
     def test_id(self) -> None:
         file_id = 'BETTY01'
         file_path = Path('~')
@@ -152,7 +190,7 @@ class FileTest(TestCase):
         file_path = Path('~')
         sut = File(file_id, file_path)
         self.assertCountEqual([], sut.notes)
-        notes = [Mock(Note), Mock(Note)]
+        notes = [Note(None, ''), Note(None, '')]
         sut.notes = notes
         self.assertCountEqual(notes, sut.notes)
 
@@ -176,10 +214,15 @@ class FileTest(TestCase):
 
 
 class HasFilesTest(TestCase):
+    class _HasFiles(Entity, HasFiles):
+        pass
+
+    def test_pickle(self) -> None:
+        sut = self._HasFiles()
+        pickle.dumps(sut)
+
     def test_files(self) -> None:
-        class _HasFiles(Entity, HasFiles):
-            pass
-        sut = _HasFiles()
+        sut = self._HasFiles()
         self.assertCountEqual([], sut.files)
         files = [Mock(File), Mock(File)]
         sut.files = files
@@ -191,6 +234,10 @@ class SourceTest(TestCase):
         source_id = 'S1'
         sut = Source(source_id)
         self.assertEquals(source_id, sut.id)
+
+    def test_pickle(self) -> None:
+        sut = Source(None)
+        pickle.dumps(sut)
 
     def test_name(self) -> None:
         name = 'The Source'
@@ -252,40 +299,44 @@ class SourceTest(TestCase):
 class CitationTest(TestCase):
     def test_id(self) -> None:
         citation_id = 'C1'
-        sut = Citation(citation_id, Mock(Source))
+        sut = Citation(citation_id, Source(None))
         self.assertEquals(citation_id, sut.id)
+
+    def test_pickle(self) -> None:
+        sut = Citation(None, Source(None))
+        pickle.dumps(sut)
 
     def test_facts(self) -> None:
         class _HasCitations(Entity, HasCitations):
             pass
         fact = _HasCitations()
-        sut = Citation(None, Mock(Source))
+        sut = Citation(None, Source(None))
         self.assertCountEqual([], sut.facts)
         sut.facts = [fact]
         self.assertCountEqual([fact], sut.facts)
 
     def test_source(self) -> None:
-        source = Mock(Source)
+        source = Source(None)
         sut = Citation(None, source)
         self.assertEquals(source, sut.source)
 
     def test_location(self) -> None:
-        sut = Citation(None, Mock(Source))
+        sut = Citation(None, Source(None))
         self.assertIsNone(sut.location)
         location = 'Somewhere'
         sut.location = location
         self.assertEquals(location, sut.location)
 
     def test_date(self) -> None:
-        sut = Citation(None, Mock(Source))
+        sut = Citation(None, Source(None))
         self.assertIsNone(sut.date)
 
     def test_files(self) -> None:
-        sut = Citation(None, Mock(Source))
+        sut = Citation(None, Source(None))
         self.assertCountEqual([], sut.files)
 
     def test_private(self) -> None:
-        sut = Citation(None, Mock(Source))
+        sut = Citation(None, Source(None))
         self.assertIsNone(sut.private)
         private = True
         sut.private = private
@@ -293,17 +344,26 @@ class CitationTest(TestCase):
 
 
 class HasCitationsTest(TestCase):
+    class _HasCitations(Entity, HasCitations):
+        pass
+
+    def test_pickle(self) -> None:
+        sut = self._HasCitations()
+        pickle.dumps(sut)
+
     def test_citations(self) -> None:
-        class _HasCitations(Entity, HasCitations):
-            pass
-        sut = _HasCitations()
+        sut = self._HasCitations()
         self.assertCountEqual([], sut.citations)
-        citation = Mock(Citation)
+        citation = Citation(None, Source(None))
         sut.citations = [citation]
         self.assertCountEqual([citation], sut.citations)
 
 
 class PlaceNameTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = PlaceName('Ikke')
+        pickle.dumps(sut)
+
     @parameterized.expand([
         (True, PlaceName('Ikke'), PlaceName('Ikke')),
         (True, PlaceName('Ikke', 'nl-NL'), PlaceName('Ikke', 'nl-NL')),
@@ -338,6 +398,10 @@ class PlaceNameTest(TestCase):
 
 
 class EnclosureTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Enclosure(Place('P1', []), Place('P2', []))
+        pickle.dumps(sut)
+
     def test_encloses(self) -> None:
         encloses = Mock(Place)
         enclosed_by = Mock(Place)
@@ -363,13 +427,17 @@ class EnclosureTest(TestCase):
         encloses = Mock(Place)
         enclosed_by = Mock(Place)
         sut = Enclosure(encloses, enclosed_by)
-        citation = Mock(Citation)
+        citation = Citation(None, Source(None))
         self.assertIsNone(sut.date)
         sut.citations = [citation]
         self.assertCountEqual([citation], sut.citations)
 
 
 class PlaceTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Place('P1', [])
+        pickle.dumps(sut)
+
     def test_events(self) -> None:
         sut = Place('P1', [PlaceName('The Place')])
         event = Event('1', Birth())
@@ -473,31 +541,40 @@ class AttendeeTest(TestCase):
 
 
 class PresenceTest(TestCase):
+    def test_pickle(self) -> None:
+        person = Person(None)
+        sut = Presence(person, Subject(), Event(None, UnknownEventType()))
+        pickle.dumps(sut)
+
     def test_person(self) -> None:
-        person = Mock(Person)
-        sut = Presence(person, Mock(PresenceRole), Mock(Event))
+        person = Person(None)
+        sut = Presence(person, Mock(PresenceRole), Event(None, UnknownEventType()))
         self.assertEquals(person, sut.person)
 
     def test_event(self) -> None:
         role = Mock(PresenceRole)
-        sut = Presence(Mock(Person), role, Mock(Event))
+        sut = Presence(Person(None), role, Event(None, UnknownEventType()))
         self.assertEquals(role, sut.role)
 
     def test_role(self) -> None:
-        event = Mock(Event)
-        sut = Presence(Mock(Person), Mock(PresenceRole), event)
+        event = Event(None, UnknownEventType())
+        sut = Presence(Person(None), Mock(PresenceRole), event)
         self.assertEquals(event, sut.event)
 
 
 class EventTest(TestCase):
     def test_id(self) -> None:
         event_id = 'E1'
-        sut = Event(event_id, Mock(EventType))
+        sut = Event(event_id, UnknownEventType())
         self.assertEquals(event_id, sut.id)
+
+    def test_pickle(self) -> None:
+        sut = Event(None, UnknownEventType())
+        pickle.dumps(sut)
 
     def test_place(self) -> None:
         place = Place('1', [PlaceName('one')])
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         sut.place = place
         self.assertEquals(place, sut.place)
         self.assertIn(sut, place.events)
@@ -507,7 +584,7 @@ class EventTest(TestCase):
 
     def test_presences(self) -> None:
         person = Person('P1')
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         presence = Presence(person, Subject(), sut)
         sut.presences.append(presence)
         self.assertCountEqual([presence], sut.presences)
@@ -517,30 +594,30 @@ class EventTest(TestCase):
         self.assertIsNone(presence.event)
 
     def test_date(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertIsNone(sut.date)
         date = Mock(Date)
         sut.date = date
         self.assertEquals(date, sut.date)
 
     def test_files(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertCountEqual([], sut.files)
 
     def test_citations(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertCountEqual([], sut.citations)
 
     def test_description(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertIsNone(sut.description)
 
     def test_private(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertIsNone(sut.private)
 
     def test_type(self) -> None:
-        event_type = Mock(EventType)
+        event_type = UnknownEventType()
         sut = Event(None, event_type)
         self.assertEquals(event_type, sut.type)
 
@@ -549,7 +626,7 @@ class EventTest(TestCase):
         file2 = Mock(File)
         file3 = Mock(File)
         file4 = Mock(File)
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         sut.files = [file1, file2, file1]
         citation = Mock(Citation)
         citation.associated_files = [file3, file4, file2]
@@ -558,6 +635,10 @@ class EventTest(TestCase):
 
 
 class PersonNameTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = PersonName(Person(None))
+        pickle.dumps(sut)
+
     def test_person(self) -> None:
         person = Person('1')
         sut = PersonName(person, 'Janet', 'Not a Girl')
@@ -612,6 +693,10 @@ class PersonNameTest(TestCase):
 
 
 class PersonTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Person('1')
+        pickle.dumps(sut)
+
     def test_parents(self) -> None:
         sut = Person('1')
         parent = Person('2')
@@ -670,7 +755,7 @@ class PersonTest(TestCase):
         self.assertCountEqual([], sut.links)
 
     def test_private(self) -> None:
-        sut = Event(None, Mock(EventType))
+        sut = Event(None, UnknownEventType())
         self.assertIsNone(sut.private)
 
     def test_name_with_names(self) -> None:
@@ -734,3 +819,30 @@ class PersonTest(TestCase):
         event.associated_files = [file5, file6, file4]
         Presence(sut, Subject(), event)
         self.assertEquals([file1, file2, file3, file4, file5, file6], list(sut.associated_files))
+
+
+class AncestryTest(TestCase):
+    def test_pickle(self) -> None:
+        entity = Entity()
+        sut = Ancestry()
+        sut.entities.append(entity)
+        unpickled_sut = pickle.loads(pickle.dumps(sut))
+        self.assertEqual(1, len(unpickled_sut.entities))
+        self.assertEqual(entity.id, unpickled_sut.entities[0].id)
+
+    def test_copy(self) -> None:
+        entity = Entity()
+        sut = Ancestry()
+        sut.entities.append(entity)
+        copied_sut = copy.copy(sut)
+        self.assertEqual(1, len(copied_sut.entities))
+        self.assertIs(entity, copied_sut.entities[0])
+
+    def test_deepcopy(self) -> None:
+        entity = Entity()
+        sut = Ancestry()
+        sut.entities.append(entity)
+        copied_sut = copy.deepcopy(sut)
+        self.assertEqual(1, len(copied_sut.entities))
+        self.assertIsNot(entity, copied_sut.entities[0])
+        self.assertEqual(entity.id, copied_sut.entities[0].id)

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict, OrderedDict
-from concurrent.futures._base import Executor
+from concurrent.futures import Executor, ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from gettext import NullTranslations
-from typing import Dict, List, Optional, Type, Sequence, Any, Iterable, TYPE_CHECKING, Set
+import os as stdos
+from typing import Dict, List, Optional, Type, Sequence, Any, Iterable, TYPE_CHECKING, Set, Callable, Awaitable
 from urllib.parse import urlparse
 
 from babel.core import parse_locale, Locale
@@ -607,28 +609,55 @@ class Configuration(GenericConfiguration):
 @reactive
 class App(Configurable[Configuration], Environment):
     def __init__(self, configuration: Configuration):
+        super().__init__(configuration)
+        self._ancestry = Ancestry()
+        self._debug = None
+        self._locale = None
+
+        self._init_services()
+
+    def _init_services(self) -> None:
         from betty.url import AppUrlGenerator, StaticPathUrlGenerator
 
-        super().__init__(configuration)
         self._active = False
-        self._ancestry = Ancestry()
         self._assets = FileSystem()
         self._dispatcher = None
         self._entity_types = None
         self._event_types = None
-        self._localized_url_generator = AppUrlGenerator(configuration)
-        self._static_url_generator = StaticPathUrlGenerator(configuration)
         self._debug = None
         self._locale = None
+        self._localized_url_generator = AppUrlGenerator(self.configuration)
+        self._static_url_generator = StaticPathUrlGenerator(self.configuration)
         self._translations = defaultdict(NullTranslations)
         self._default_translations = None
         self._extensions = None
         self._activation_exit_stack = AsyncExitStack()
         self._jinja2_environment = None
         self._renderer = None
-        self._executor = None
+        self.__thread_pool_executor = None
+        self.__process_pool_executor = None
         self._locks = Locks()
         self._http_client = None
+
+    def __getstate__(self):
+        return {
+            '_ancestry': self._ancestry,
+            '_configuration': self._configuration,
+            '_debug': self._debug,
+            '_locale': self._locale,
+            'react': self.react,
+        }
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._init_services()
+
+    def __copy__(self) -> App:
+        copied = type(self)(self._configuration)
+        copied._ancestry = self._ancestry
+        copied._debug = self._debug
+        copied._locale = self._locale
+        return copied
 
     @classmethod
     def configuration_type(cls) -> Type[Configuration]:
@@ -636,10 +665,13 @@ class App(Configurable[Configuration], Environment):
 
     async def wait(self) -> None:
         await self._wait_for_threads()
+        await self._wait_for_processes()
 
     async def _wait_for_threads(self) -> None:
-        if self._executor:
-            await self._executor.wait()
+        del self._thread_pool_executor
+
+    async def _wait_for_processes(self) -> None:
+        del self._process_pool_executor
 
     async def activate(self) -> None:
         if self._active:
@@ -813,10 +845,36 @@ class App(Configurable[Configuration], Environment):
         self._renderer = None
 
     @property
-    def executor(self) -> Executor:
-        if self._executor is None:
-            self._executor = ExceptionRaisingAwaitableExecutor(ThreadPoolExecutor())
-        return self._executor
+    def concurrency(self) -> int:
+        return stdos.cpu_count()
+
+    @property
+    def _thread_pool_executor(self) -> Executor:
+        if self.__thread_pool_executor is None:
+            self.__thread_pool_executor = ExceptionRaisingAwaitableExecutor(ThreadPoolExecutor(self.concurrency))
+        return self.__thread_pool_executor
+
+    @_thread_pool_executor.deleter
+    def _thread_pool_executor(self) -> None:
+        if self.__thread_pool_executor is not None:
+            self.__thread_pool_executor.wait()
+
+    def do_in_thread(self, task: Callable[[], None]) -> Awaitable[None]:
+        return asyncio.get_event_loop().run_in_executor(self._thread_pool_executor, task)
+
+    @property
+    def _process_pool_executor(self) -> Executor:
+        if self.__process_pool_executor is None:
+            self.__process_pool_executor = ExceptionRaisingAwaitableExecutor(ProcessPoolExecutor(self.concurrency))
+        return self.__process_pool_executor
+
+    @_process_pool_executor.deleter
+    def _process_pool_executor(self) -> None:
+        if self.__process_pool_executor is not None:
+            self.__process_pool_executor.wait()
+
+    def do_in_process(self, task: Callable[[], None]) -> Awaitable[None]:
+        return asyncio.get_event_loop().run_in_executor(self._process_pool_executor, task)
 
     @property
     def locks(self) -> Locks:

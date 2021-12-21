@@ -1,3 +1,5 @@
+import copy
+import pickle
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +13,7 @@ from betty.app import Configuration, LocaleConfiguration, LocalesConfiguration, 
     AppExtensionsConfiguration, ConfigurationError, ConfigurableExtension, App, CyclicDependencyError
 from betty.asyncio import sync
 from betty.config import Configuration as GenericConfiguration
+from betty.model import Entity
 from betty.model.ancestry import Ancestry
 from betty.tests import TestCase
 
@@ -258,6 +261,12 @@ class AppExtensionsConfigurationTest(TestCase):
 
 
 class ConfigurationTest(TestCase):
+    def test_pickle(self) -> None:
+        sut = Configuration('', 'https://example.com')
+        sut.extensions.add(AppExtensionConfiguration(Extension, True, None))
+        sut.locales.add(LocaleConfiguration('nl-NL', 'nl'))
+        pickle.dumps(sut)
+
     def test_output_directory_path(self):
         output_directory_path = Path('~')
         sut = Configuration(output_directory_path, 'https://example.com')
@@ -749,6 +758,42 @@ class AppTest(TestCase):
         'output_directory_path': '/tmp/path/to/site',
         'base_url': 'https://example.com',
     }
+
+    @sync
+    async def test_pickle(self) -> None:
+        configuration = Configuration(**self._MINIMAL_CONFIGURATION_ARGS)
+        entity = Entity()
+        sut = App(configuration)
+        sut.ancestry.entities.append(entity)
+        unpickled_sut = pickle.loads(pickle.dumps(sut))
+        async with unpickled_sut:
+            pass
+        self.assertEqual(1, len(unpickled_sut.ancestry.entities))
+        self.assertEqual(entity.id, unpickled_sut.ancestry.entities[0].id)
+
+    @sync
+    async def test_copy(self) -> None:
+        configuration = Configuration(**self._MINIMAL_CONFIGURATION_ARGS)
+        entity = Entity()
+        sut = App(configuration)
+        sut.ancestry.entities.append(entity)
+        copied_sut = copy.copy(sut)
+        async with copied_sut:
+            pass
+        self.assertEqual(1, len(copied_sut.ancestry.entities))
+        self.assertEqual(entity.id, copied_sut.ancestry.entities[0].id)
+
+    @sync
+    async def test_deepcopy(self) -> None:
+        configuration = Configuration(**self._MINIMAL_CONFIGURATION_ARGS)
+        entity = Entity()
+        sut = App(configuration)
+        sut.ancestry.entities.append(entity)
+        copied_sut = copy.deepcopy(sut)
+        async with copied_sut:
+            pass
+        self.assertEqual(1, len(copied_sut.ancestry.entities))
+        self.assertEqual(entity.id, copied_sut.ancestry.entities[0].id)
 
     @sync
     async def test_ancestry(self) -> None:
