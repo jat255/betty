@@ -195,7 +195,10 @@ class App(Acquirer, Releaser, Configurable[AppConfiguration], ReactiveInstance):
         Temporarily change this application's locale and the global gettext translations.
         """
         if requested_locale is None:
-            requested_locale = self.configuration.locale
+            if self._locale is None:
+                requested_locale = self.configuration.locale
+            else:
+                requested_locale = self._locale
 
         negotiated_locale = negotiate_locale(
             requested_locale,
