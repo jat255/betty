@@ -7,14 +7,14 @@ from reactives.tests import assert_reactor_called, assert_in_scope, assert_scope
 
 from betty.app import Extension, App, ConfigurableExtension
 from betty.config import Configuration, Configurable, DumpedConfigurationImport, DumpedConfigurationExport, \
-    ConfigurationMapping
+    ConfigurationMap
 from betty.config.load import ConfigurationValidationError, Loader
 from betty.model import Entity, get_entity_type_name, get_entity_type, UserFacingEntity
-from betty.project import ExtensionConfiguration, ExtensionConfigurationMapping, ProjectConfiguration, \
+from betty.project import ExtensionConfiguration, ExtensionConfigurationMap, ProjectConfiguration, \
     LocaleConfiguration, LocaleConfigurationCollection, EntityReference, EntityReferenceCollection, \
-    EntityTypeConfiguration, EntityTypeConfigurationMapping
+    EntityTypeConfiguration, EntityTypeConfigurationMap
 from betty.tests.config.test___init__ import raises_no_configuration_errors, raises_configuration_error, \
-    ConfigurationCollectionMappingTestBase
+    ConfigurationMapTestBase
 from betty.typing import Void
 
 
@@ -419,9 +419,9 @@ class TestExtensionConfiguration:
         assert expected == (one == other)
 
 
-class TestExtensionConfigurationMapping(ConfigurationCollectionMappingTestBase):
-    def get_sut(self) -> ConfigurationMapping:
-        return ExtensionConfigurationMapping()
+class TestExtensionConfigurationMap(ConfigurationMapTestBase):
+    def get_sut(self) -> ConfigurationMap:
+        return ExtensionConfigurationMap()
 
     def get_configuration_key(self) -> Any:
         return DummyConfigurableExtension
@@ -492,16 +492,16 @@ class TestEntityTypeConfiguration:
         assert expected == (one == other)
 
 
-class EntityTypeConfigurationMappingTestEntity(UserFacingEntity, Entity):
+class EntityTypeConfigurationMapTestEntity(UserFacingEntity, Entity):
     pass
 
 
-class TestEntityTypeConfigurationMapping(ConfigurationCollectionMappingTestBase):
-    def get_sut(self) -> ConfigurationMapping:
-        return EntityTypeConfigurationMapping()
+class TestEntityTypeConfigurationMap(ConfigurationMapTestBase):
+    def get_sut(self) -> ConfigurationMap:
+        return EntityTypeConfigurationMap()
 
     def get_configuration_key(self) -> Any:
-        return get_entity_type(EntityTypeConfigurationMappingTestEntity)
+        return get_entity_type(EntityTypeConfigurationMapTestEntity)
 
 
 class TestProjectConfiguration:

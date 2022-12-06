@@ -12,7 +12,7 @@ from reactives import reactive, scope
 from betty.app import Extension, ConfigurableExtension
 from betty.classtools import repr_instance
 from betty.config import Configuration, DumpedConfigurationImport, Configurable, FileBasedConfiguration, \
-    ConfigurationMapping, DumpedConfigurationExport, DumpedConfigurationDict
+    ConfigurationMap, DumpedConfigurationExport, DumpedConfigurationDict
 from betty.config.dump import minimize, minimize_dict
 from betty.config.load import ConfigurationValidationError, Loader, Field
 from betty.config.validate import validate, validate_positive_number
@@ -255,7 +255,7 @@ class ExtensionConfiguration(Configuration):
         }, True)
 
 
-class ExtensionConfigurationMapping(ConfigurationMapping[Type[Extension], ExtensionConfiguration]):
+class ExtensionConfigurationMap(ConfigurationMap[Type[Extension], ExtensionConfiguration]):
     def _get_key(self, configuration: ExtensionConfiguration) -> Type[Extension]:
         return configuration.extension_type
 
@@ -331,7 +331,7 @@ class EntityTypeConfiguration(Configuration):
         }, True)
 
 
-class EntityTypeConfigurationMapping(ConfigurationMapping[Type[Entity], EntityTypeConfiguration]):
+class EntityTypeConfigurationMap(ConfigurationMap[Type[Entity], EntityTypeConfiguration]):
     def _get_key(self, configuration: EntityTypeConfiguration) -> Type[Entity]:
         return configuration.entity_type
 
@@ -491,14 +491,14 @@ class ProjectConfiguration(FileBasedConfiguration):
         self._content_negotiation = False
         self._title = 'Betty'
         self._author: Optional[str] = None
-        self._entity_types = EntityTypeConfigurationMapping([
+        self._entity_types = EntityTypeConfigurationMap([
             EntityTypeConfiguration(Person, True),
             EntityTypeConfiguration(Event, True),
             EntityTypeConfiguration(Place, True),
             EntityTypeConfiguration(Source, True),
         ])
         self._entity_types.react(self)
-        self._extensions = ExtensionConfigurationMapping()
+        self._extensions = ExtensionConfigurationMap()
         self._extensions.react(self)
         self._debug = False
         self._locales = LocaleConfigurationCollection()
@@ -592,11 +592,11 @@ class ProjectConfiguration(FileBasedConfiguration):
         return len(self.locales) > 1
 
     @property
-    def entity_types(self) -> EntityTypeConfigurationMapping:
+    def entity_types(self) -> EntityTypeConfigurationMap:
         return self._entity_types
 
     @property
-    def extensions(self) -> ExtensionConfigurationMapping:
+    def extensions(self) -> ExtensionConfigurationMap:
         return self._extensions
 
     @reactive  # type: ignore

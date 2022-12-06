@@ -6,8 +6,8 @@ import pytest
 from reactives.tests import assert_reactor_called, assert_in_scope, assert_scope_empty
 
 from betty.app import App
-from betty.config import FileBasedConfiguration, ConfigurationMapping, Configuration, DumpedConfigurationExport, \
-    DumpedConfigurationImport
+from betty.config import FileBasedConfiguration, ConfigurationMap, Configuration, DumpedConfigurationExport, \
+    DumpedConfigurationImport, ConfigurationSequence, ConfigurationCollection
 from betty.config.error import ConfigurationError, ConfigurationErrorCollection
 from betty.config.load import ConfigurationFormatError, Loader
 
@@ -85,7 +85,7 @@ class TestFileBasedConfiguration:
                 configuration.configuration_file_path = f.name
 
 
-class ConfigurationMappingTestDummyConfiguration(Configuration):
+class ConfigurationCollectionTestConfiguration(Configuration):
     def __init__(self, configuration_key: str, configuration_value: int):
         super().__init__()
         self.key = configuration_key
@@ -98,8 +98,95 @@ class ConfigurationMappingTestDummyConfiguration(Configuration):
         raise NotImplementedError
 
 
-class ConfigurationMappingTestDummy(ConfigurationMapping[str, ConfigurationMappingTestDummyConfiguration]):
-    def _get_key(self, configuration: ConfigurationMappingTestDummyConfiguration) -> str:
+class ConfigurationSequenceTestConfigurationSequence(ConfigurationSequence[ConfigurationCollectionTestConfiguration]):
+    def _default_configuration_item(self) -> ConfigurationCollectionTestConfiguration:
+        return ConfigurationCollectionTestConfiguration('foo', 123)
+
+
+class TestConfigurationSequence:
+    def test_getitem(self) -> None:
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        sut = ConfigurationSequenceTestConfigurationSequence([configuration])
+        with assert_in_scope(sut):
+            assert configuration == sut[0]
+
+    def test_delitem(self) -> None:
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        sut = ConfigurationSequenceTestConfigurationSequence([configuration])
+        with assert_scope_empty():
+            with assert_reactor_called(sut):
+                del sut[0]
+        assert [] == list(sut)
+        assert [] == list(configuration.react._reactors)
+
+    def test_iter(self) -> None:
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationSequenceTestConfigurationSequence([
+            configuration_a,
+            configuration_b,
+        ])
+        with assert_in_scope(sut):
+            assert [configuration_a, configuration_b] == list(iter(sut))
+
+    def test_len(self) -> None:
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationSequenceTestConfigurationSequence([
+            configuration_a,
+            configuration_b,
+        ])
+        with assert_in_scope(sut):
+            assert 2 == len(sut)
+
+    def test_eq(self) -> None:
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationSequenceTestConfigurationSequence([
+            configuration_a,
+            configuration_b,
+        ])
+        other = ConfigurationSequenceTestConfigurationSequence([
+            configuration_a,
+            configuration_b,
+        ])
+        with assert_in_scope(sut):
+            assert other == sut
+
+    def test_prepend(self) -> None:
+        assert False
+
+    def test_append(self) -> None:
+        sut = ConfigurationSequenceTestConfigurationSequence([ConfigurationCollectionTestConfiguration('bar', 456)])
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        with assert_scope_empty():
+            with assert_reactor_called(sut):
+                sut.append(configuration)
+        assert configuration == sut[1]
+        with assert_reactor_called(sut):
+            configuration.react.trigger()
+
+    def test_insert(self) -> None:
+        assert False
+
+    def test_move_to_beginning(self) -> None:
+        assert False
+
+    def test_move_towards_beginning(self) -> None:
+        assert False
+
+    def test_move_to_end(self) -> None:
+        assert False
+
+    def test_move_towards_end(self) -> None:
+        assert False
+
+    def test_reorder(self) -> None:
+        assert False
+
+
+class ConfigurationMapTestConfigurationMap(ConfigurationMap[str, ConfigurationCollectionTestConfiguration]):
+    def _get_key(self, configuration: ConfigurationCollectionTestConfiguration) -> str:
         return configuration.key
 
     def _load_key(self, dumped_configuration_key: str) -> str:
@@ -108,20 +195,20 @@ class ConfigurationMappingTestDummy(ConfigurationMapping[str, ConfigurationMappi
     def _dump_key(self, configuration_key: str) -> str:
         return configuration_key
 
-    def _default_configuration_item(self, configuration_key: str) -> ConfigurationMappingTestDummyConfiguration:
-        return ConfigurationMappingTestDummyConfiguration('foo', 123)
+    def _default_configuration_item(self, configuration_key: str) -> ConfigurationCollectionTestConfiguration:
+        return ConfigurationCollectionTestConfiguration('foo', 123)
 
 
-class TestConfigurationMapping:
+class TestConfigurationMap:
     def test_getitem(self) -> None:
-        configuration = ConfigurationMappingTestDummyConfiguration('foo', 123)
-        sut = ConfigurationMappingTestDummy([configuration])
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        sut = ConfigurationMapTestConfigurationMap([configuration])
         with assert_in_scope(sut):
             assert configuration == sut['foo']
 
     def test_delitem(self) -> None:
-        configuration = ConfigurationMappingTestDummyConfiguration('foo', 123)
-        sut = ConfigurationMappingTestDummy([configuration])
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        sut = ConfigurationMapTestConfigurationMap([configuration])
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 del sut['foo']
@@ -129,9 +216,9 @@ class TestConfigurationMapping:
         assert [] == list(configuration.react._reactors)
 
     def test_iter(self) -> None:
-        configuration_a = ConfigurationMappingTestDummyConfiguration('foo', 123)
-        configuration_b = ConfigurationMappingTestDummyConfiguration('bar', 456)
-        sut = ConfigurationMappingTestDummy([
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationMapTestConfigurationMap([
             configuration_a,
             configuration_b,
         ])
@@ -139,9 +226,9 @@ class TestConfigurationMapping:
             assert [configuration_a, configuration_b] == list(iter(sut))
 
     def test_len(self) -> None:
-        configuration_a = ConfigurationMappingTestDummyConfiguration('foo', 123)
-        configuration_b = ConfigurationMappingTestDummyConfiguration('bar', 456)
-        sut = ConfigurationMappingTestDummy([
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationMapTestConfigurationMap([
             configuration_a,
             configuration_b,
         ])
@@ -149,31 +236,61 @@ class TestConfigurationMapping:
             assert 2 == len(sut)
 
     def test_eq(self) -> None:
-        configuration_a = ConfigurationMappingTestDummyConfiguration('foo', 123)
-        configuration_b = ConfigurationMappingTestDummyConfiguration('bar', 456)
-        sut = ConfigurationMappingTestDummy([
+        configuration_a = ConfigurationCollectionTestConfiguration('foo', 123)
+        configuration_b = ConfigurationCollectionTestConfiguration('bar', 456)
+        sut = ConfigurationMapTestConfigurationMap([
             configuration_a,
             configuration_b,
         ])
-        other = ConfigurationMappingTestDummy([
+        other = ConfigurationMapTestConfigurationMap([
             configuration_a,
             configuration_b,
         ])
         with assert_in_scope(sut):
             assert other == sut
 
-    def test_add(self) -> None:
-        sut = ConfigurationMappingTestDummy()
-        configuration = ConfigurationMappingTestDummyConfiguration('foo', 123)
+    def test_prepend(self) -> None:
+        sut = ConfigurationMapTestConfigurationMap([ConfigurationCollectionTestConfiguration('bar', 456)])
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
         with assert_scope_empty():
             with assert_reactor_called(sut):
-                sut.add(configuration)
+                sut.prepend(configuration)
         assert configuration == sut['foo']
+        assert configuration == list(sut)[0]
         with assert_reactor_called(sut):
             configuration.react.trigger()
 
+    def test_append(self) -> None:
+        sut = ConfigurationMapTestConfigurationMap([ConfigurationCollectionTestConfiguration('bar', 456)])
+        configuration = ConfigurationCollectionTestConfiguration('foo', 123)
+        with assert_scope_empty():
+            with assert_reactor_called(sut):
+                sut.append(configuration)
+        assert configuration == sut['foo']
+        assert configuration == list(sut)[1]
+        with assert_reactor_called(sut):
+            configuration.react.trigger()
 
-class ConfigurationCollectionMappingTestBase:
+    def test_insert(self) -> None:
+        assert False
+
+    def test_move_to_beginning(self) -> None:
+        assert False
+
+    def test_move_towards_beginning(self) -> None:
+        assert False
+
+    def test_move_to_end(self) -> None:
+        assert False
+
+    def test_move_towards_end(self) -> None:
+        assert False
+
+    def test_reorder(self) -> None:
+        assert False
+
+
+class ConfigurationCollectionTestBase:
     def test(self) -> None:
         sut = self.get_sut()
         configuration_key = self.get_configuration_key()
@@ -185,7 +302,23 @@ class ConfigurationCollectionMappingTestBase:
         loaded_configuration_key = sut._load_key(dumped_configuration_key)
         assert configuration_key == loaded_configuration_key
 
-    def get_sut(self) -> ConfigurationMapping:
+    def get_sut(self) -> ConfigurationCollection:
+        raise NotImplementedError
+
+    def get_configuration_key(self) -> Any:
+        raise NotImplementedError
+
+
+class ConfigurationSequenceTestBase(ConfigurationCollectionTestBase):
+    def get_sut(self) -> ConfigurationSequence:
+        raise NotImplementedError
+
+    def get_configuration_key(self) -> Any:
+        raise NotImplementedError
+
+
+class ConfigurationMapTestBase(ConfigurationCollectionTestBase):
+    def get_sut(self) -> ConfigurationMap:
         raise NotImplementedError
 
     def get_configuration_key(self) -> Any:

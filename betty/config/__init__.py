@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, TypeVar, Generic, Optional, Iterable
+from typing import Dict, TypeVar, Generic, Optional, Iterable, List
 
 from reactives import reactive, scope
 from reactives.factory.type import ReactiveInstance
 
 from betty.classtools import Repr, repr_instance
 from betty.config.dump import DumpedConfigurationImport, DumpedConfigurationExport, \
-    DumpedConfigurationDict, minimize_dict
+    DumpedConfigurationDict, minimize_dict, minimize_list
 from betty.config.format import FORMATS_BY_EXTENSION, EXTENSIONS
 from betty.config.load import ConfigurationFormatError, Loader, ConfigurationLoadError
 from betty.os import PathLike, ChDir
@@ -144,39 +145,31 @@ class FileBasedConfiguration(Configuration):
 ConfigurationKeyT = TypeVar('ConfigurationKeyT')
 
 
-class ConfigurationMapping(Configuration, Generic[ConfigurationKeyT, ConfigurationT]):
+class ConfigurationCollection(Configuration, Generic[ConfigurationKeyT, ConfigurationT]):
+    _configurations: List[ConfigurationT] | Dict[ConfigurationKeyT, ConfigurationT]
+
     def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None):
         super().__init__()
-        self._configurations: Dict[ConfigurationKeyT, ConfigurationT] = {}
         if configurations is not None:
-            for configuration in configurations:
-                self.add(configuration)
+            self.append(*configurations)
 
     def __contains__(self, item) -> bool:
         return item in self._configurations
 
     @scope.register_self
     def __getitem__(self, configuration_key: ConfigurationKeyT) -> ConfigurationT:
-        try:
-            return self._configurations[configuration_key]
-        except KeyError:
-            item = self._default_configuration_item(configuration_key)
-            self.add(item)
-            return item
+        return self._configurations[configuration_key]
 
     def __delitem__(self, configuration_key: ConfigurationKeyT) -> None:
         self.remove(configuration_key)
 
     @scope.register_self
     def __iter__(self) -> Iterable[ConfigurationT]:
-        return (configuration for configuration in self._configurations.values())
+        raise NotImplementedError
 
     @scope.register_self
     def __len__(self) -> int:
         return len(self._configurations)
-
-    def __repr__(self):
-        return repr_instance(self, configurations=list(self._configurations.values()))
 
     @scope.register_self
     def __eq__(self, other):
@@ -186,7 +179,7 @@ class ConfigurationMapping(Configuration, Generic[ConfigurationKeyT, Configurati
 
     def remove(self, *configuration_keys: ConfigurationKeyT) -> None:
         for configuration_key in configuration_keys:
-            with suppress(KeyError):
+            with suppress(LookupError):
                 self._configurations[configuration_key].react.shutdown(self)
             del self._configurations[configuration_key]
         self.react.trigger()
@@ -194,12 +187,126 @@ class ConfigurationMapping(Configuration, Generic[ConfigurationKeyT, Configurati
     def clear(self) -> None:
         self.remove(*self._configurations.keys())
 
-    def add(self, *configurations: ConfigurationT) -> None:
+    def prepend(self, *configurations: ConfigurationT) -> None:
+        raise NotImplementedError
+
+    def append(self, *configurations: ConfigurationT) -> None:
+        raise NotImplementedError
+
+    def insert(self, index: int, *configurations: ConfigurationT) -> None:
+        raise NotImplementedError
+
+    def move_to_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+    def move_towards_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+    def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+
+class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generic[ConfigurationT]):
+    def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None):
+        self._configurations: List[ConfigurationT] = []
+        super().__init__(configurations)
+
+    @scope.register_self
+    def __iter__(self) -> Iterable[ConfigurationT]:
+        return (configuration for configuration in self._configurations)
+
+    def __repr__(self):
+        return repr_instance(self, configurations=self._configurations)
+
+    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
+        if loader.assert_list(dumped_configuration):
+            loader.on_commit(self.clear)
+            loader.assert_sequence(
+                dumped_configuration,
+                self._load_configuration,  # type: ignore
+            )
+
+    def _load_configuration(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
+        with loader.context() as errors:
+            with loader.catch():
+                configuration = self._default_configuration_item()
+                configuration.load(dumped_configuration, loader)
+                loader.on_commit(lambda: self.add(configuration))
+        return errors.valid
+
+    def dump(self) -> DumpedConfigurationExport:
+        return minimize_list([
+            configuration.dump()
+            for configuration in self._configurations
+        ])
+
+    def _default_configuration_item(self) -> ConfigurationT:
+        raise NotImplementedError
+
+    def prepend(self, *configurations: ConfigurationT) -> None:
         for configuration in configurations:
-            if self._get_key(configuration) not in self._configurations:
-                self._configurations[self._get_key(configuration)] = configuration
-                configuration.react(self)
+            self._configurations.insert(0, configuration)
+            configuration.react(self)
         self.react.trigger()
+
+    def append(self, *configurations: ConfigurationT) -> None:
+        for configuration in configurations:
+            self._configurations.append(configuration)
+            configuration.react(self)
+        self.react.trigger()
+
+    def insert(self, index: int, *configurations: ConfigurationT) -> None:
+        for configuration in reversed(configurations):
+            self._configurations.insert(index, configuration)
+            configuration.react(self)
+        self.react.trigger()
+
+    def move_to_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def move_towards_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+
+
+class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT], Generic[ConfigurationKeyT, ConfigurationT]):
+    def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None):
+        self._configurations: OrderedDict = OrderedDict()
+        super().__init__(configurations)
+
+    @scope.register_self
+    def __getitem__(self, configuration_key: ConfigurationKeyT) -> ConfigurationT:
+        try:
+            return super().__getitem__(configuration_key)
+        except KeyError:
+            item = self._default_configuration_item(configuration_key)
+            self.add(item)
+            return item
+
+    @scope.register_self
+    def __iter__(self) -> Iterable[ConfigurationT]:
+        return (configuration for configuration in self._configurations.values())
+
+    def __repr__(self):
+        return repr_instance(self, configurations=list(self._configurations.values()))
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
         if loader.assert_dict(dumped_configuration):
@@ -238,6 +345,46 @@ class ConfigurationMapping(Configuration, Generic[ConfigurationKeyT, Configurati
 
     def _is_void_empty(self) -> bool:
         return False
+
+    def prepend(self, *configurations: ConfigurationT) -> None:
+        for configuration in configurations:
+            configuration_key = self._get_key(configuration)
+            self._configurations[configuration_key] = configuration
+            configuration.react(self)
+        self.move_to_beginning(*map(self._get_key, configurations))
+
+    def append(self, *configurations: ConfigurationT) -> None:
+        for configuration in configurations:
+            configuration_key = self._get_key(configuration)
+            self._configurations[configuration_key] = configuration
+            configuration.react(self)
+        self.move_to_end(*map(self._get_key, configurations))
+
+    def insert(self, index: int, *configurations: ConfigurationT) -> None:
+        raise NotImplementedError
+        #         configuration.react(self)
+        # self.react.trigger()
+
+    def move_to_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        for configuration_key in reversed(configuration_keys):
+            self._configurations.move_to_end(configuration_key, False)
+        self.react.trigger()
+
+    def move_towards_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        for configuration_key in configuration_keys:
+            self._configurations.move_to_end(configuration_key)
+        self.react.trigger()
+
+    def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
+        self.react.trigger()
+
+    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
+        raise NotImplementedError
 
 
 class Configurable(Generic[ConfigurationT]):
