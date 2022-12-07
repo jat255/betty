@@ -435,7 +435,7 @@ class TestWikipedia:
         aioresponses.get(api_url, payload=api_response_body)
 
         with App() as app:
-            app.project.configuration.extensions.add(ExtensionConfiguration(Wikipedia))
+            app.project.configuration.extensions.append(ExtensionConfiguration(Wikipedia))
             actual = app.jinja2_environment.from_string(
                 '{% for entry in (links | wikipedia) %}{{ entry.content }}{% endfor %}').render(links=links)
         assert extract == actual
@@ -472,7 +472,7 @@ class TestWikipedia:
         aioresponses.get(translations_api_url, payload=translations_api_response_body)
 
         with App() as app:
-            app.project.configuration.extensions.add(ExtensionConfiguration(Wikipedia))
+            app.project.configuration.extensions.append(ExtensionConfiguration(Wikipedia))
             app.project.ancestry.entities.append(resource)
             await load(app)
 

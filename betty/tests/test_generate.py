@@ -98,7 +98,7 @@ class TestGenerate:
 
     async def test_files(self):
         with App() as app:
-            app.project.configuration.entity_types.add(EntityTypeConfiguration(File, True))
+            app.project.configuration.entity_types.append(EntityTypeConfiguration(File, True))
             await generate(app)
         assert_betty_html(app, '/file/index.html')
         assert_betty_json(app, '/file/index.json', 'fileCollection')

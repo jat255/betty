@@ -94,13 +94,13 @@ class ConfigurableExtension(GenericConfigurableExtension[ConfigurableExtensionCo
 class TestApp:
     def test_extensions_with_one_extension(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(NonConfigurableExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(NonConfigurableExtension))
             assert isinstance(sut.extensions[NonConfigurableExtension], NonConfigurableExtension)
 
     def test_extensions_with_one_configurable_extension(self) -> None:
         check = 1337
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(ConfigurableExtension, True, ConfigurableExtensionConfiguration(
+            sut.project.configuration.extensions.append(ExtensionConfiguration(ConfigurableExtension, True, ConfigurableExtensionConfiguration(
                 check=check,
             )))
             assert isinstance(sut.extensions[ConfigurableExtension], ConfigurableExtension)
@@ -108,7 +108,7 @@ class TestApp:
 
     async def test_extensions_with_one_extension_with_single_chained_dependency(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(DependsOnNonConfigurableExtensionExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(DependsOnNonConfigurableExtensionExtensionExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 3 == len(carrier)
@@ -118,8 +118,8 @@ class TestApp:
 
     async def test_extensions_with_multiple_extensions_with_duplicate_dependencies(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(DependsOnNonConfigurableExtensionExtension))
-            sut.project.configuration.extensions.add(ExtensionConfiguration(AlsoDependsOnNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(DependsOnNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(AlsoDependsOnNonConfigurableExtensionExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 3 == len(carrier)
@@ -130,13 +130,13 @@ class TestApp:
     def test_extensions_with_multiple_extensions_with_cyclic_dependencies(self) -> None:
         with pytest.raises(CyclicDependencyError):
             with App() as sut:
-                sut.project.configuration.extensions.add(ExtensionConfiguration(CyclicDependencyOneExtension))
+                sut.project.configuration.extensions.append(ExtensionConfiguration(CyclicDependencyOneExtension))
                 sut.extensions
 
     async def test_extensions_with_comes_before_with_other_extension(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(NonConfigurableExtension))
-            sut.project.configuration.extensions.add(ExtensionConfiguration(ComesBeforeNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(NonConfigurableExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(ComesBeforeNonConfigurableExtensionExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 2 == len(carrier)
@@ -145,7 +145,7 @@ class TestApp:
 
     async def test_extensions_with_comes_before_without_other_extension(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(ComesBeforeNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(ComesBeforeNonConfigurableExtensionExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 1 == len(carrier)
@@ -153,8 +153,8 @@ class TestApp:
 
     async def test_extensions_with_comes_after_with_other_extension(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(ComesAfterNonConfigurableExtensionExtension))
-            sut.project.configuration.extensions.add(ExtensionConfiguration(NonConfigurableExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(ComesAfterNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(NonConfigurableExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 2 == len(carrier)
@@ -163,7 +163,7 @@ class TestApp:
 
     async def test_extensions_with_comes_after_without_other_extension(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(ComesAfterNonConfigurableExtensionExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(ComesAfterNonConfigurableExtensionExtension))
             carrier: List[TrackableExtension] = []
             await sut.dispatcher.dispatch(Tracker)(carrier)
             assert 1 == len(carrier)
@@ -173,12 +173,12 @@ class TestApp:
         with App() as sut:
             # Get the extensions before making configuration changes to warm the cache.
             sut.extensions
-            sut.project.configuration.extensions.add(ExtensionConfiguration(NonConfigurableExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(NonConfigurableExtension))
             assert isinstance(sut.extensions[NonConfigurableExtension], NonConfigurableExtension)
 
     def test_extensions_removal_from_configuration(self) -> None:
         with App() as sut:
-            sut.project.configuration.extensions.add(ExtensionConfiguration(NonConfigurableExtension))
+            sut.project.configuration.extensions.append(ExtensionConfiguration(NonConfigurableExtension))
             # Get the extensions before making configuration changes to warm the cache.
             sut.extensions
             del sut.project.configuration.extensions[NonConfigurableExtension]

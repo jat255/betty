@@ -93,7 +93,7 @@ class TestPrivatizer:
         citation.files.append(citation_file)
 
         with App() as app:
-            app.project.configuration.extensions.add(ExtensionConfiguration(Privatizer))
+            app.project.configuration.extensions.append(ExtensionConfiguration(Privatizer))
             app.project.ancestry.entities.append(person)
             app.project.ancestry.entities.append(source)
             app.project.ancestry.entities.append(citation)

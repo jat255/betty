@@ -127,7 +127,7 @@ class TestGramps:
                 f.write(family_tree_two_xml)
 
             with App() as app:
-                app.project.configuration.extensions.add(ExtensionConfiguration(Gramps, True, GrampsConfiguration(
+                app.project.configuration.extensions.append(ExtensionConfiguration(Gramps, True, GrampsConfiguration(
                     family_trees=ReactiveList([
                         FamilyTreeConfiguration(gramps_family_tree_one_path),
                         FamilyTreeConfiguration(gramps_family_tree_two_path),

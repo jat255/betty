@@ -5,7 +5,7 @@ from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, TypeVar, Generic, Optional, Iterable, List
+from typing import Dict, TypeVar, Generic, Optional, Iterable, List, Union, SupportsIndex, Hashable
 
 from reactives import reactive, scope
 from reactives.factory.type import ReactiveInstance
@@ -18,9 +18,9 @@ from betty.config.load import ConfigurationFormatError, Loader, ConfigurationLoa
 from betty.os import PathLike, ChDir
 
 try:
-    from typing_extensions import TypeGuard
+    from typing_extensions import TypeAlias, TypeGuard
 except ModuleNotFoundError:
-    from typing import TypeGuard  # type: ignore
+    from typing import TypeAlias, TypeGuard  # type: ignore
 
 
 @reactive
@@ -142,7 +142,8 @@ class FileBasedConfiguration(Configuration):
         self._configuration_file_path = None
 
 
-ConfigurationKeyT = TypeVar('ConfigurationKeyT')
+ConfigurationKey: TypeAlias = Union[SupportsIndex, slice, Hashable]
+ConfigurationKeyT = TypeVar('ConfigurationKeyT', bound=ConfigurationKey)
 
 
 class ConfigurationCollection(Configuration, Generic[ConfigurationKeyT, ConfigurationT]):
@@ -208,9 +209,6 @@ class ConfigurationCollection(Configuration, Generic[ConfigurationKeyT, Configur
     def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
         raise NotImplementedError
 
-    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
-
 
 class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generic[ConfigurationT]):
     def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None):
@@ -237,7 +235,7 @@ class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generi
             with loader.catch():
                 configuration = self._default_configuration_item()
                 configuration.load(dumped_configuration, loader)
-                loader.on_commit(lambda: self.add(configuration))
+                loader.on_commit(lambda: self.append(configuration))
         return errors.valid
 
     def dump(self) -> DumpedConfigurationExport:
@@ -267,24 +265,35 @@ class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generi
             configuration.react(self)
         self.react.trigger()
 
-    def move_to_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
+    def move_to_beginning(self, *configuration_keys: int) -> None:
+        configuration_keys = list(configuration_keys)
+        self.move_to_end(
+            *configuration_keys,
+            *[
+                configuration_key
+                for configuration_key
+                in range(0, len(self._configurations))
+                if configuration_key not in configuration_keys
+            ]
+        )
+
+    def move_towards_beginning(self, *configuration_keys: int) -> None:
+        for configuration_key in configuration_keys:
+            self._configurations.insert(configuration_key - 1, self._configurations.pop(configuration_key))
         self.react.trigger()
 
-    def move_towards_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
+    def move_to_end(self, *configuration_keys: int) -> None:
+        configuration_keys = list(configuration_keys)
+        for configuration_key in configuration_keys:
+            self._configurations.append(self._configurations[configuration_key])
+        for configuration_key in reversed(configuration_keys):
+            self._configurations.pop(configuration_key)
         self.react.trigger()
 
-    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
+    def move_towards_end(self, *configuration_keys: int) -> None:
+        for configuration_key in reversed(configuration_keys):
+            self._configurations.insert(configuration_key + 1, self._configurations.pop(configuration_key))
         self.react.trigger()
-
-    def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
-        self.react.trigger()
-
-    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
 
 
 class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT], Generic[ConfigurationKeyT, ConfigurationT]):
@@ -298,7 +307,7 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
             return super().__getitem__(configuration_key)
         except KeyError:
             item = self._default_configuration_item(configuration_key)
-            self.add(item)
+            self.append(item)
             return item
 
     @scope.register_self
@@ -322,7 +331,7 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
                 configuration_key = self._load_key(dumped_configuration_key)
                 configuration = self._default_configuration_item(configuration_key)
                 configuration.load(dumped_configuration, loader)
-                loader.on_commit(lambda: self.add(configuration))
+                loader.on_commit(lambda: self.append(configuration))
         return errors.valid
 
     def dump(self) -> DumpedConfigurationExport:
@@ -353,17 +362,30 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
             configuration.react(self)
         self.move_to_beginning(*map(self._get_key, configurations))
 
-    def append(self, *configurations: ConfigurationT) -> None:
+    def _append_without_trigger(self, *configurations: ConfigurationT) -> None:
         for configuration in configurations:
             configuration_key = self._get_key(configuration)
             self._configurations[configuration_key] = configuration
             configuration.react(self)
-        self.move_to_end(*map(self._get_key, configurations))
+        self._move_to_end_without_trigger(*map(self._get_key, configurations))
+
+    def append(self, *configurations: ConfigurationT) -> None:
+        self._append_without_trigger(*configurations)
+        self.react.trigger()
+
+    def _insert_without_trigger(self, index: int, *configurations: ConfigurationT) -> None:
+        configurations = list(configurations)
+        current_configuration_keys = list(self._configurations.keys())
+        self._append_without_trigger(*configurations)
+        self._move_to_end_without_trigger(
+            *current_configuration_keys[0:index],
+            *map(self._get_key, configurations),
+            *current_configuration_keys[index:]
+        )
 
     def insert(self, index: int, *configurations: ConfigurationT) -> None:
-        raise NotImplementedError
-        #         configuration.react(self)
-        # self.react.trigger()
+        self._insert_without_trigger(index, *configurations)
+        self.react.trigger()
 
     def move_to_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
         for configuration_key in reversed(configuration_keys):
@@ -371,20 +393,29 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
         self.react.trigger()
 
     def move_towards_beginning(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
-        self.react.trigger()
+        self._move_by_offset(-1, *configuration_keys)
 
-    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+    def _move_to_end_without_trigger(self, *configuration_keys: ConfigurationKeyT) -> None:
         for configuration_key in configuration_keys:
             self._configurations.move_to_end(configuration_key)
+
+    def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
+        print(self._configurations)
+        self._move_to_end_without_trigger(*configuration_keys)
+        print(self._configurations)
         self.react.trigger()
 
     def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
-        self.react.trigger()
+        self._move_by_offset(1, *configuration_keys)
 
-    def reorder(self, *configuration_keys: ConfigurationKeyT) -> None:
-        raise NotImplementedError
+    def _move_by_offset(self, offset: int, *configuration_keys: ConfigurationKeyT) -> None:
+        current_configuration_keys = list(self._configurations.keys())
+        ordered_current_configuration_keys = current_configuration_keys if offset < 0 else list(reversed(current_configuration_keys))
+        for configuration_key in ordered_current_configuration_keys:
+            if configuration_key in configuration_keys:
+                configuration_index = current_configuration_keys.index(configuration_key)
+                self._insert_without_trigger(configuration_index + offset, self._configurations.pop(configuration_key))
+        self.react.trigger()
 
 
 class Configurable(Generic[ConfigurationT]):

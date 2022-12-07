@@ -278,7 +278,7 @@ class ExtensionConfigurationMap(ConfigurationMap[Type[Extension], ExtensionConfi
             try:
                 self._configurations[extension_type].enabled = True
             except KeyError:
-                self.add(self._default_configuration_item(extension_type))
+                self.append(self._default_configuration_item(extension_type))
 
     def disable(self, *extension_types: Type[Extension]):
         for extension_type in extension_types:
@@ -305,15 +305,19 @@ class EntityTypeConfiguration(Configuration):
     def entity_type(self) -> Type[Entity]:
         return self._entity_type
 
+    def _validate_generate_html_list(self, generate_html_list: Optional[bool]) -> Optional[bool]:
+        if generate_html_list and not issubclass(self._entity_type, UserFacingEntity):
+            raise ConfigurationValidationError('Cannot generate HTML pages for entity types that are not user-facing.')
+        return generate_html_list
+
     @reactive  # type: ignore
     @property
     def generate_html_list(self) -> bool:
         return self._generate_html_list or False
 
     @generate_html_list.setter
+    @validate(_validate_generate_html_list)
     def generate_html_list(self, generate_html_list: Optional[bool]) -> None:
-        if not issubclass(self._entity_type, UserFacingEntity):
-            raise ValueError(f'Cannot generate HTML pages for entity types that do not inherit from {UserFacingEntity.__module__}.{UserFacingEntity.__name__}.')
         self._generate_html_list = generate_html_list
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:

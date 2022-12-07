@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from typing import Type, Dict, Any
+from typing import Type, Dict, Any, Optional, Iterable, Tuple
 
 import pytest
 from reactives.tests import assert_reactor_called, assert_in_scope, assert_scope_empty
 
 from betty.app import Extension, App, ConfigurableExtension
-from betty.config import Configuration, Configurable, DumpedConfigurationImport, DumpedConfigurationExport, \
-    ConfigurationMap
+from betty.config import Configuration, Configurable, DumpedConfigurationImport, DumpedConfigurationExport
 from betty.config.load import ConfigurationValidationError, Loader
-from betty.model import Entity, get_entity_type_name, get_entity_type, UserFacingEntity
+from betty.model import Entity, get_entity_type_name, UserFacingEntity
 from betty.project import ExtensionConfiguration, ExtensionConfigurationMap, ProjectConfiguration, \
     LocaleConfiguration, LocaleConfigurationCollection, EntityReference, EntityReferenceCollection, \
     EntityTypeConfiguration, EntityTypeConfigurationMap
@@ -419,12 +418,37 @@ class TestExtensionConfiguration:
         assert expected == (one == other)
 
 
-class TestExtensionConfigurationMap(ConfigurationMapTestBase):
-    def get_sut(self) -> ConfigurationMap:
-        return ExtensionConfigurationMap()
+class ExtensionTypeConfigurationMapTestExtension0(Extension):
+    pass
 
-    def get_configuration_key(self) -> Any:
-        return DummyConfigurableExtension
+
+class ExtensionTypeConfigurationMapTestExtension1(Extension):
+    pass
+
+
+class ExtensionTypeConfigurationMapTestExtension2(Extension):
+    pass
+
+
+class ExtensionTypeConfigurationMapTestExtension3(Extension):
+    pass
+
+
+class TestExtensionConfigurationMap(ConfigurationMapTestBase):
+    _ConfigurationKeyT = Type[Extension]
+    _ConfigurationT = ExtensionConfiguration
+    _CONFIGURATION_KEYS = (ExtensionTypeConfigurationMapTestExtension0, ExtensionTypeConfigurationMapTestExtension1, ExtensionTypeConfigurationMapTestExtension2, ExtensionTypeConfigurationMapTestExtension3)
+
+    def get_sut(self, configurations: Optional[Iterable[ExtensionConfiguration]] = None) -> ExtensionConfigurationMap:
+        return ExtensionConfigurationMap(configurations)
+
+    def get_configurations(self) -> Tuple[ExtensionConfiguration, ExtensionConfiguration, ExtensionConfiguration, ExtensionConfiguration]:
+        return (
+            ExtensionConfiguration(self._CONFIGURATION_KEYS[0]),
+            ExtensionConfiguration(self._CONFIGURATION_KEYS[1]),
+            ExtensionConfiguration(self._CONFIGURATION_KEYS[2]),
+            ExtensionConfiguration(self._CONFIGURATION_KEYS[3]),
+        )
 
 
 class EntityTypeConfigurationTestEntityOne(UserFacingEntity):
@@ -492,16 +516,37 @@ class TestEntityTypeConfiguration:
         assert expected == (one == other)
 
 
-class EntityTypeConfigurationMapTestEntity(UserFacingEntity, Entity):
+class EntityTypeConfigurationMapTestEntity0(Entity):
+    pass
+
+
+class EntityTypeConfigurationMapTestEntity1(Entity):
+    pass
+
+
+class EntityTypeConfigurationMapTestEntity2(Entity):
+    pass
+
+
+class EntityTypeConfigurationMapTestEntity3(Entity):
     pass
 
 
 class TestEntityTypeConfigurationMap(ConfigurationMapTestBase):
-    def get_sut(self) -> ConfigurationMap:
-        return EntityTypeConfigurationMap()
+    _ConfigurationKeyT = Type[Entity]
+    _ConfigurationT = EntityTypeConfiguration
+    _CONFIGURATION_KEYS = (EntityTypeConfigurationMapTestEntity0, EntityTypeConfigurationMapTestEntity1, EntityTypeConfigurationMapTestEntity2, EntityTypeConfigurationMapTestEntity3)
 
-    def get_configuration_key(self) -> Any:
-        return get_entity_type(EntityTypeConfigurationMapTestEntity)
+    def get_sut(self, configurations: Optional[Iterable[EntityTypeConfiguration]] = None) -> EntityTypeConfigurationMap:
+        return EntityTypeConfigurationMap(configurations)
+
+    def get_configurations(self) -> Tuple[EntityTypeConfiguration, EntityTypeConfiguration, EntityTypeConfiguration, EntityTypeConfiguration]:
+        return (
+            EntityTypeConfiguration(self._CONFIGURATION_KEYS[0]),
+            EntityTypeConfiguration(self._CONFIGURATION_KEYS[1]),
+            EntityTypeConfiguration(self._CONFIGURATION_KEYS[2]),
+            EntityTypeConfiguration(self._CONFIGURATION_KEYS[3]),
+        )
 
 
 class TestProjectConfiguration:
@@ -823,7 +868,7 @@ class TestProjectConfiguration:
 
     def test_dump_should_dump_one_extension_with_configuration(self) -> None:
         sut = ProjectConfiguration()
-        sut.extensions.add(ExtensionConfiguration(DummyConfigurableExtension, True, DummyConfigurableExtensionConfiguration(
+        sut.extensions.append(ExtensionConfiguration(DummyConfigurableExtension, True, DummyConfigurableExtensionConfiguration(
             check=1337,
         )))
         dumped_configuration: Any = sut.dump()
@@ -838,7 +883,7 @@ class TestProjectConfiguration:
 
     def test_dump_should_dump_one_extension_without_configuration(self) -> None:
         sut = ProjectConfiguration()
-        sut.extensions.add(ExtensionConfiguration(DummyNonConfigurableExtension))
+        sut.extensions.append(ExtensionConfiguration(DummyNonConfigurableExtension))
         dumped_configuration: Any = sut.dump()
         assert dumped_configuration is not Void
         expected = {

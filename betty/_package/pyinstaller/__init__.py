@@ -34,9 +34,9 @@ def _filter_submodule(submodule: str) -> bool:
 async def _build_assets() -> None:
     npm_builder_extension_types = {HttpApiDoc, Maps, Trees}
     with App() as app:
-        app.project.configuration.extensions.add(ExtensionConfiguration(_Npm))
+        app.project.configuration.extensions.append(ExtensionConfiguration(_Npm))
         for extension_type in npm_builder_extension_types:
-            app.project.configuration.extensions.add(ExtensionConfiguration(extension_type))
+            app.project.configuration.extensions.append(ExtensionConfiguration(extension_type))
         await asyncio.gather(*[
             build_assets(app.extensions[extension_type])
             for extension_type
