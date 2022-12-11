@@ -89,3 +89,7 @@ def minimize(dumped_configuration: DumpedConfigurationExport) -> Union[DumpedCon
     if isinstance(dumped_configuration, dict):
         return minimize_dict(dumped_configuration)
     return dumped_configuration
+
+
+def void_none(value: Any) -> Any:
+    return Void if value is None else value

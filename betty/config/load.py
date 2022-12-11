@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import inspect
-from contextlib import contextmanager
-from os import path
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Type, Dict, Union, Callable, Optional, Tuple, Any, ContextManager, List, \
-    Generic
+from typing import TYPE_CHECKING, Iterator, Type, Dict, Union, Callable, Optional, Any, TypeVar, List
 
-from reactives.factory.property import _ReactiveProperty
+from babel.core import parse_locale
 
-from betty.config.dump import DumpedConfigurationImport, DumpedConfigurationImportT, DumpedConfigurationImportU, \
-    DumpedConfigurationTypeT, DumpedConfigurationType, DumpedConfigurationDict, DumpedConfigurationList
+from betty.config.dump import DumpedConfigurationImport, DumpedConfigurationImportU, \
+    DumpedConfigurationTypeT, DumpedConfigurationType
 from betty.config.error import ConfigurationError, ConfigurationErrorCollection
+from betty.locale import bcp_47_to_rfc_1766
+from betty.model import EntityTypeError, EntityTypeInvalidError, EntityTypeImportError, Entity, get_entity_type
 
 try:
     from typing_extensions import TypeAlias, TypeGuard
@@ -34,7 +34,7 @@ class ConfigurationFormatError(ConfigurationLoadError):
     pass
 
 
-_TYPE_VIOLATION_ERROR_MESSAGE_BUILDERS: Dict[Type, Callable[[], str]] = {
+_TYPE_VIOLATION_ERROR_MESSAGE_BUILDERS: Dict[Type[DumpedConfigurationType], Callable[[], str]] = {
     bool: lambda: _('This must be a boolean.'),
     int: lambda: _('This must be an integer.'),
     float: lambda: _('This must be a decimal number.'),
@@ -44,266 +44,247 @@ _TYPE_VIOLATION_ERROR_MESSAGE_BUILDERS: Dict[Type, Callable[[], str]] = {
 }
 
 
-ConfigurationValueAssertFunction: TypeAlias = Callable[
+T: TypeAlias = TypeVar('T')
+U: TypeAlias = TypeVar('U')
+
+
+ValueAssertionFunction: TypeAlias = Callable[
     [
-        DumpedConfigurationImport,
-        'Loader',
+        T,
+        ConfigurationErrorCollection,
     ],
-    TypeGuard[DumpedConfigurationImportT],
+    U,
 ]
 
 
-ConfigurationValueAssertLoaderMethod: TypeAlias = Callable[
+# @todo We stopped distinguishing between callables on different objects
+# @todo Instead we just count parameters and pass on the error collection, or not
+# @todo
+ValueAssertionLoaderMethod: TypeAlias = Callable[
     [
-        DumpedConfigurationImport,
+        T,
     ],
-    TypeGuard[DumpedConfigurationImportT],
+    U,
 ]
 
 
-ConfigurationValueAssert: TypeAlias = Union[
-    ConfigurationValueAssertFunction[DumpedConfigurationImportT],
-    ConfigurationValueAssertLoaderMethod[DumpedConfigurationImportT],
+ValueAssertion: TypeAlias = Union[
+    ValueAssertionFunction,
+    ValueAssertionLoaderMethod,
 ]
 
 
-ConfigurationKeyAndValueAssert: TypeAlias = Callable[
+KeyAndValueAssertion: TypeAlias = Callable[
     [
-        DumpedConfigurationImport,
-        'Loader',
+        T,
+        ConfigurationErrorCollection,
         str,
     ],
-    TypeGuard[DumpedConfigurationImportT],
+    U,
 ]
 
 
-ConfigurationAssert: TypeAlias = Union[
-    ConfigurationValueAssert[DumpedConfigurationImportT],
-    ConfigurationKeyAndValueAssert[DumpedConfigurationImportT],
+Assertion: TypeAlias = Union[
+    ValueAssertion,
+    KeyAndValueAssertion,
 ]
 
 
-Committer = Callable[[], None]
+class Assertions:
+    def __init__(self, *assertions: Assertion):
+        self._assertions = assertions
+
+    def __call__(self, configuration: Any, errors: ConfigurationErrorCollection, configuration_key: Optional[str] = None) -> Any:
+        for assertion in self._assertions:
+            with errors.context() as assertion_errors:
+                args = [configuration, assertion_errors]
+                if configuration_key and len(inspect.signature(assertion).parameters) > len(args):
+                    args.append(configuration_key)
+                configuration = assertion(*args)
+            if assertion_errors.invalid:
+                return
 
 
-FieldCommitter = Callable[[DumpedConfigurationImportT], None]
+@dataclass(frozen=True)
+class Field:
+    name: str
+    required: bool
+    assertions: Optional[Assertions] = None
 
 
-class Field(Generic[DumpedConfigurationImportT]):
-    def __init__(
-            self,
-            required: bool,
-            configuration_assert: ConfigurationAssert[DumpedConfigurationImportT],
-            committer: Optional[FieldCommitter[DumpedConfigurationImportT]] = None,
-    ):
-        self._required = required
-        self._configuration_assert = configuration_assert
-        self._committer = committer
+class Fields:
+    def __init__(self, *fields: Field):
+        self._fields = fields
 
-    @property
-    def required(self) -> bool:
-        return self._required
-
-    @property
-    def configuration_assert(self) -> ConfigurationAssert[DumpedConfigurationImportT]:
-        return self._configuration_assert
-
-    def commit(self, dumped_configuration: DumpedConfigurationImportT) -> None:
-        if self._committer:
-            self._committer(dumped_configuration)
+    def __iter__(self) -> Iterator[Field]:
+        return (field for field in self._fields)
 
 
-class Loader:
-    def __init__(self):
-        self._errors: ConfigurationErrorCollection[ConfigurationLoadError] = ConfigurationErrorCollection()
-        self._committers = []
-        self._committed = False
+def _assert_type(dumped_configuration: DumpedConfigurationImportU, errors: ConfigurationErrorCollection, configuration_value_required_type: Type[DumpedConfigurationTypeT], configuration_value_disallowed_type: Optional[Type[DumpedConfigurationType]] = None) -> TypeGuard[DumpedConfigurationTypeT]:
+    if isinstance(dumped_configuration, configuration_value_required_type) and (not configuration_value_disallowed_type or not isinstance(dumped_configuration, configuration_value_disallowed_type)):
+        return True
+    errors.append(ConfigurationValidationError(_TYPE_VIOLATION_ERROR_MESSAGE_BUILDERS[configuration_value_required_type]()))
+    return False
 
-    @property
-    def errors(self) -> ConfigurationErrorCollection:
-        return self._errors
 
-    def _assert_uncommitted(self) -> None:
-        if self._committed:
-            raise RuntimeError('This load was committed already.')
+def assert_bool() -> ValueAssertion[Any, TypeGuard[bool]]:
+    def _assertion(dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> TypeGuard[bool]:
+        return _assert_type(dumped_configuration, errors, bool)
+    return _assertion
 
-    def on_commit(self, committer: Committer) -> None:
-        self._assert_uncommitted()
-        self._committers.append(committer)
 
-    def error(self, *errors: ConfigurationLoadError) -> None:
-        self._assert_uncommitted()
-        self._errors.append(*errors)
+def assert_int() -> ValueAssertion[Any, TypeGuard[int]]:
+    def _assertion(dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> TypeGuard[int]:
+        return _assert_type(dumped_configuration, errors, int, bool)
+    return _assertion
 
-    @contextmanager
-    def catch(self) -> Iterator[None]:
-        try:
-            yield
-        except ConfigurationLoadError as e:
-            self.error(e)
 
-    @contextmanager
-    def context(self, context: Optional[str] = None) -> Iterator[ConfigurationErrorCollection]:
-        context_errors: ConfigurationErrorCollection = ConfigurationErrorCollection()
-        if context:
-            context_errors = context_errors.with_context(context)
-        previous_errors = self._errors
-        self._errors = context_errors
-        yield context_errors
-        self._errors = previous_errors
-        self.error(*context_errors)
+def assert_float() -> ValueAssertion[Any, TypeGuard[float]]:
+    def _assertion(dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> TypeGuard[float]:
+        return _assert_type(dumped_configuration, errors, float)
+    return _assertion
 
-    def commit(self) -> None:
-        if not self._errors.valid:
-            raise self._errors
-        if not self._committed:
-            self._committed = True
-            for committer in self._committers:
-                committer()
 
-    def _assert(self, dumped_configuration: DumpedConfigurationImport, configuration_assert: ConfigurationAssert[DumpedConfigurationImportT], configuration_key: Optional[str] = None) -> TypeGuard[DumpedConfigurationImportT]:
-        args: List[Any] = [dumped_configuration]
-        if configuration_assert not in map(lambda x: x[1], inspect.getmembers(self)):
-            args.append(self)
-        if configuration_key and len(inspect.signature(configuration_assert).parameters) > len(args):
-            args.append(configuration_key)
-        return configuration_assert(*args)
+def assert_str() -> ValueAssertion[Any, TypeGuard[str]]:
+    def _assertion(dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> TypeGuard[str]:
+        return _assert_type(dumped_configuration, errors, str)
+    return _assertion
 
-    def _assert_type(self, dumped_configuration: DumpedConfigurationImportU, configuration_value_required_type: Type[DumpedConfigurationTypeT], configuration_value_disallowed_type: Optional[Type[DumpedConfigurationType]] = None) -> TypeGuard[DumpedConfigurationTypeT]:
-        if isinstance(dumped_configuration, configuration_value_required_type) and (not configuration_value_disallowed_type or not isinstance(dumped_configuration, configuration_value_disallowed_type)):
-            return True
-        self.error(ConfigurationValidationError(_TYPE_VIOLATION_ERROR_MESSAGE_BUILDERS[configuration_value_required_type]()))
-        return False
 
-    def assert_bool(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[bool]:
-        return self._assert_type(dumped_configuration, bool)
+def assert_list() -> ValueAssertion[Any, TypeGuard[TypeGuard[List]]]:
+    def _assertion(dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> TypeGuard[List]:
+        return _assert_type(dumped_configuration, errors, list)
+    return _assertion
 
-    def assert_int(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[int]:
-        return self._assert_type(dumped_configuration, int, bool)
 
-    def assert_float(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[float]:
-        return self._assert_type(dumped_configuration, float)
+def assert_dict() -> ValueAssertion[Any, TypeGuard[Dict]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> TypeGuard[Dict]:
+        return _assert_type(value, errors, dict)
+    return _assertion
 
-    def assert_str(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[str]:
-        return self._assert_type(dumped_configuration, str)
 
-    def assert_list(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[DumpedConfigurationList]:
-        return self._assert_type(dumped_configuration, list)
+def assert_sequence(assertions: Assertions) -> ValueAssertion[Any, TypeGuard[List[Any]]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> TypeGuard[List[Any]]:
+        with errors.context() as sequence_errors:
+            if assert_list()(value, errors):
+                for i, dumped_configuration_item in enumerate(value):
+                    with sequence_errors.context(str(i)) as item_errors:
+                        assertions(dumped_configuration_item, item_errors)
+        return sequence_errors.valid
+    return _assertion
 
-    def assert_sequence(self, dumped_configuration: DumpedConfigurationImport, configuration_value_assert: ConfigurationValueAssert[DumpedConfigurationImportT]) -> TypeGuard[DumpedConfigurationList[DumpedConfigurationImportT]]:
-        with self.context() as errors:
-            if self.assert_list(dumped_configuration):
-                for i, dumped_configuration_item in enumerate(dumped_configuration):
-                    with self.context(str(i)):
-                        self._assert(dumped_configuration_item, configuration_value_assert)
-        return errors.valid
 
-    def assert_dict(self, dumped_configuration: DumpedConfigurationImport) -> TypeGuard[DumpedConfigurationDict[int]]:
-        return self._assert_type(dumped_configuration, dict)
+def assert_mapping(assertions: Assertions) -> KeyAndValueAssertion[Any, TypeGuard[Dict[str, Any]]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> TypeGuard[Dict[str, Any]]:
+        with errors.context() as mapping_errors:
+            if assert_dict()(value, errors):
+                for configuration_key, dumped_configuration_item in value.items():
+                    with mapping_errors.context(configuration_key) as item_errors:
+                        assertions(dumped_configuration_item, item_errors, configuration_key)
+        return mapping_errors.valid
+    return _assertion
 
-    @contextmanager
-    def _assert_key(
-        self,
-        dumped_configuration: DumpedConfigurationImport,
-        configuration_key: str,
-        configuration_assert: ConfigurationAssert[DumpedConfigurationImportT],
-        required: bool,
-    ) -> Iterator[Tuple[DumpedConfigurationImport, bool]]:
-        if self.assert_dict(dumped_configuration):
-            with self.context(configuration_key):
-                if configuration_key in dumped_configuration:
-                    dumped_configuration_item = dumped_configuration[configuration_key]
-                    if self._assert(dumped_configuration_item, configuration_assert, configuration_key):
-                        yield dumped_configuration_item, True
-                        return
-                elif required:
-                    self.error(ConfigurationValidationError(_('The key "{configuration_key}" is required.').format(
-                        configuration_key=configuration_key
-                    )))
-        yield None, False
 
-    def assert_required_key(
-        self,
-        dumped_configuration: DumpedConfigurationImport,
-        configuration_key: str,
-        configuration_assert: ConfigurationAssert[DumpedConfigurationImportT],
-    ) -> ContextManager[Tuple[DumpedConfigurationImport, bool]]:
-        return self._assert_key(  # type: ignore
-            dumped_configuration,
-            configuration_key,
-            configuration_assert,
-            True,
-        )
+def assert_fields(fields: Fields) -> ValueAssertion[Any, None]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> None:
+        if assert_dict()(value, errors):
+            for field in fields:
+                with errors.context(field.name):
+                    if field.name in value:
+                        dumped_configuration_item = value[field.name]
+                        field.assertions(dumped_configuration_item, errors, field.name)
+                    elif field.required:
+                        errors.append(ConfigurationValidationError(_('The key "{configuration_key}" is required.').format(
+                            configuration_key=field.name,
+                        )))
+    return _assertion
 
-    def assert_optional_key(
-        self,
-        dumped_configuration: DumpedConfigurationImport,
-        configuration_key: str,
-        configuration_assert: ConfigurationAssert[DumpedConfigurationImportT],
-    ) -> ContextManager[Tuple[Optional[DumpedConfigurationImportT], bool]]:
-        return self._assert_key(  # type: ignore
-            dumped_configuration,
-            configuration_key,
-            configuration_assert,
-            False,
-        )
 
-    def assert_mapping(self, dumped_configuration: DumpedConfigurationImport, configuration_assert: ConfigurationAssert[DumpedConfigurationImportT]) -> TypeGuard[Dict[str, DumpedConfigurationImportT]]:
-        with self.context() as errors:
-            if self.assert_dict(dumped_configuration):
-                for configuration_key, dumped_configuration_item in dumped_configuration.items():
-                    with self.context(configuration_key):
-                        self._assert(dumped_configuration_item, configuration_assert, configuration_key)
-        return errors.valid
+def assert_field(field: Field) -> ValueAssertion[Any, None]:
+    return assert_fields(Fields(field))
 
-    def assert_record(
-            self,
-            dumped_configuration: DumpedConfigurationImport,
-            fields: Dict[str, Field],
-    ) -> TypeGuard[Dict[str, DumpedConfigurationImport]]:
-        if not fields:
-            raise ValueError('One or more fields are required.')
-        with self.context() as errors:
-            if self.assert_dict(dumped_configuration):
-                known_configuration_keys = set(fields.keys())
-                unknown_configuration_keys = set(dumped_configuration.keys()) - known_configuration_keys
+
+def assert_record(fields: Fields) -> ValueAssertion[Any, None]:
+    if not fields:
+        raise ValueError('One or more fields are required.')
+
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> None:
+        with errors.context() as record_errors:
+            if assert_dict()(value, errors):
+                known_configuration_keys = set(map(lambda x: x.name, fields))
+                unknown_configuration_keys = set(value.keys()) - known_configuration_keys
                 for unknown_configuration_key in unknown_configuration_keys:
-                    with self.context(unknown_configuration_key):
-                        self.error(ConfigurationValidationError(_('Unknown key: {unknown_configuration_key}. Did you mean {known_configuration_keys}?').format(
+                    with errors.context(unknown_configuration_key) as key_errors:
+                        key_errors.append(ConfigurationValidationError(_('Unknown key: {unknown_configuration_key}. Did you mean {known_configuration_keys}?').format(
                             unknown_configuration_key=f'"{unknown_configuration_key}"',
                             known_configuration_keys=', '.join(map(lambda x: f'"{x}"', sorted(known_configuration_keys)))
                         )))
-                for field_name, field in fields.items():
-                    configuration_item_assert = self.assert_required_key if field.required else self.assert_optional_key
-                    with configuration_item_assert(dumped_configuration, field_name, field._configuration_assert) as (dumped_configuration_item, valid):
-                        if valid:
-                            field.commit(dumped_configuration_item)
-        return errors.valid
+                assert_fields(fields)(value, errors)
+        return record_errors.valid
+    return _assertion
 
-    def assert_path(self, dumped_path: DumpedConfigurationImport) -> TypeGuard[str]:
-        if self.assert_str(dumped_path):
-            Path(dumped_path).expanduser().resolve()
-            return True
-        return False
 
-    def assert_directory_path(self, dumped_path: DumpedConfigurationImport) -> TypeGuard[str]:
-        if self.assert_str(dumped_path):
-            self.assert_path(dumped_path)
-            if path.isdir(dumped_path):
+def assert_path() -> ValueAssertion[Any, Optional[Path]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> Optional[Path]:
+        if assert_str()(value, errors):
+            return Path(value).expanduser().resolve()
+    return _assertion
+
+
+def assert_directory_path() -> ValueAssertion[Any, Optional[Path]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> Optional[Path]:
+        if directory_path := assert_path()(value, errors):
+            if directory_path.is_dir():
+                return directory_path
+            errors.append(ConfigurationValidationError(_('"{path}" is not a directory.').format(
+                path=value,
+            )))
+    return _assertion
+
+
+def assert_locale() -> TypeGuard[str]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> TypeGuard[str]:
+        if assert_str()(value, errors):
+            try:
+                parse_locale(
+                    bcp_47_to_rfc_1766(
+                        value,  # type: ignore
+                    ),
+                )
                 return True
-            self.error(ConfigurationValidationError(_('"{path}" is not a directory.').format(path=dumped_path)))
+            except ValueError:
+                errors.append(ConfigurationValidationError(_('"{locale}" is not a valid IETF BCP 47 language tag.').format(
+                    locale=value,
+                )))
         return False
+    return _assertion
 
-    def assert_setattr(self, instance: Any, attr_name: str, value: Any) -> None:
-        with self.catch():
-            if hasattr(type(instance), attr_name):
-                attr = getattr(type(instance), attr_name)
-                if isinstance(attr, _ReactiveProperty):
-                    attr = attr._decorated_property
-                if not isinstance(attr, property):
-                    raise RuntimeError(f'Cannot automatically load the configuration for property {type(instance)}.{attr_name}.')
-                for validator in getattr(attr.fset, '_betty_configuration_validators', ()):
-                    value = validator(instance, value)
-            # Ensure that the attribute exists.
-            getattr(instance, attr_name)
-            self.on_commit(lambda: setattr(instance, attr_name, value))
+
+def assert_setattr(instance: Any, attr_name: str) -> ValueAssertion[Any, None]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> None:
+        with errors.catch():
+            setattr(instance, attr_name, value)
+        return value
+    return _assertion
+
+
+def assert_entity_type() -> ValueAssertion[Any, Type[Entity]]:
+    def _assertion(value: Any, errors: ConfigurationErrorCollection) -> Type[Entity]:
+        if assert_str()(value, errors):
+            try:
+                return get_entity_type(value)
+            except EntityTypeImportError:
+                errors.append(ConfigurationValidationError(_('Cannot find and import "{entity_type}".').format(
+                    entity_type=str(value),
+                )))
+            except EntityTypeInvalidError:
+                errors.append(ConfigurationValidationError(
+                    _('"{entity_type}" is not a valid Betty entity type.').format(
+                        entity_type=str(value),
+                    )))
+            except EntityTypeError:
+                errors.append(ConfigurationValidationError(
+                    _('Cannot determine the entity type for "{entity_type}". Did you perhaps make a typo, or could it be that the entity type comes from another package that is not yet installed?').format(
+                        entity_type=str(value),
+                    )))
+    return _assertion

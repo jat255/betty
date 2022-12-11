@@ -3,17 +3,17 @@ from __future__ import annotations
 from typing import Type, Dict, Any, Optional, Iterable, Tuple
 
 import pytest
-from reactives.tests import assert_reactor_called, assert_in_scope, assert_scope_empty
+from reactives.tests import assert_reactor_called, assert_scope_empty
 
 from betty.app import Extension, App, ConfigurableExtension
 from betty.config import Configuration, Configurable, DumpedConfigurationImport, DumpedConfigurationExport
 from betty.config.load import ConfigurationValidationError, Loader
 from betty.model import Entity, get_entity_type_name, UserFacingEntity
-from betty.project import ExtensionConfiguration, ExtensionConfigurationMap, ProjectConfiguration, \
-    LocaleConfiguration, LocaleConfigurationCollection, EntityReference, EntityReferenceCollection, \
-    EntityTypeConfiguration, EntityTypeConfigurationMap
+from betty.project import ExtensionConfiguration, ExtensionConfigurationMapping, ProjectConfiguration, \
+    LocaleConfiguration, LocaleConfigurationMapping, EntityReference, EntityReferenceSequence, \
+    EntityTypeConfiguration, EntityTypeConfigurationMapping
 from betty.tests.config.test___init__ import raises_no_configuration_errors, raises_configuration_error, \
-    ConfigurationMapTestBase
+    ConfigurationMappingTestBase, ConfigurationSequenceTestBase
 from betty.typing import Void
 
 
@@ -24,7 +24,7 @@ class EntityReferenceTestEntity(Entity):
 class TestEntityReference:
     def test_entity_type_with_constraint(self) -> None:
         entity_type = EntityReferenceTestEntity
-        sut = EntityReference(entity_type_constraint=entity_type)
+        sut = EntityReference(entity_type, None, True)
         assert entity_type == sut.entity_type
         with pytest.raises(AttributeError):
             sut.entity_type = entity_type
@@ -45,7 +45,7 @@ class TestEntityReference:
 
     def test_load_with_constraint(self) -> None:
         entity_type_constraint = EntityReferenceTestEntity
-        sut = EntityReference(entity_type_constraint=entity_type_constraint)
+        sut = EntityReference(entity_type_constraint, None, True)
         entity_id = '123'
         dumped_configuration = entity_id
         with raises_no_configuration_errors() as loader:
@@ -54,7 +54,7 @@ class TestEntityReference:
 
     def test_load_with_constraint_without_string_should_error(self) -> None:
         entity_type_constraint = EntityReferenceTestEntity
-        sut = EntityReference(entity_type_constraint=entity_type_constraint)
+        sut = EntityReference(entity_type_constraint, None, True)
         entity_id = None
         dumped_configuration = entity_id
         with raises_configuration_error(error_type=ConfigurationValidationError) as loader:
@@ -122,7 +122,7 @@ class TestEntityReference:
             sut.load(dumped_configuration, loader)
 
     def test_dump_with_constraint(self) -> None:
-        sut = EntityReference(entity_type_constraint=Entity)
+        sut = EntityReference(Entity, None, True)
         entity_id = '123'
         sut.entity_id = entity_id
         expected = entity_id
@@ -141,87 +141,23 @@ class TestEntityReference:
         assert expected == sut.dump()
 
 
-class EntityReferenceCollectionTestEntity(Entity):
+class EntityReferenceSequenceTestEntity(Entity):
     pass
 
 
-class TestEntityReferenceCollection:
-    @pytest.mark.parametrize('sut', [
-        EntityReferenceCollection(),
-        EntityReferenceCollection(entity_type_constraint=EntityReferenceCollectionTestEntity),
-    ])
-    def test_load_without_list_should_error(self, sut: EntityReferenceCollection) -> None:
-        dumped_configuration = None
-        with raises_configuration_error(error_type=ConfigurationValidationError) as loader:
-            sut.load(dumped_configuration, loader)
+class TestEntityReferenceSequence(ConfigurationSequenceTestBase):
+    _ConfigurationT = EntityReference
 
-    @pytest.mark.parametrize('sut', [
-        EntityReferenceCollection(),
-        EntityReferenceCollection(entity_type_constraint=EntityReferenceCollectionTestEntity),
-    ])
-    def test_load_without_entity_references(self, sut: EntityReferenceCollection) -> None:
-        dumped_configuration: DumpedConfigurationImport = []
-        with raises_no_configuration_errors() as loader:
-            sut.load(dumped_configuration, loader)
-        assert [] == list(sut)
+    def get_sut(self, entity_references: Iterable[EntityReference] = None) -> EntityReferenceSequence:
+        return EntityReferenceSequence(entity_references)
 
-    def test_load_with_constraint_with_entity_references(self) -> None:
-        entity_type = EntityReferenceCollectionTestEntity
-        entity_id = '123'
-        sut = EntityReferenceCollection(entity_type_constraint=entity_type)
-        dumped_configuration = [
-            entity_id,
-        ]
-        with raises_no_configuration_errors() as loader:
-            sut.load(dumped_configuration, loader)
-        assert [EntityReference(entity_type, entity_id)] == list(sut)
-
-    def test_load_without_constraint_with_entity_references(self) -> None:
-        sut = EntityReferenceCollection()
-        entity_type = EntityReferenceCollectionTestEntity
-        entity_id = '123'
-        dumped_configuration = [
-            {
-                'entity_type': get_entity_type_name(entity_type),
-                'entity_id': entity_id,
-            },
-        ]
-        with raises_no_configuration_errors() as loader:
-            sut.load(dumped_configuration, loader)
-        assert [EntityReference(entity_type, entity_id)] == list(sut)
-
-    def test_dump_with_constraint_with_entity_references(self) -> None:
-        entity_type = EntityReferenceCollectionTestEntity
-        entity_id = '123'
-        sut = EntityReferenceCollection(entity_type_constraint=entity_type)
-        sut.append(EntityReference(entity_type, entity_id))
-        expected = [
-            entity_id,
-        ]
-        assert expected == sut.dump()
-
-    def test_dump_with_constraint_without_entity_references(self) -> None:
-        sut = EntityReferenceCollection(entity_type_constraint=EntityReferenceCollectionTestEntity)
-        expected = Void
-        assert expected == sut.dump()
-
-    def test_dump_without_constraint_with_entity_references(self) -> None:
-        entity_type = EntityReferenceCollectionTestEntity
-        entity_id = '123'
-        sut = EntityReferenceCollection()
-        sut.append(EntityReference(entity_type, entity_id))
-        expected = [
-            {
-                'entity_type': get_entity_type_name(entity_type),
-                'entity_id': entity_id,
-            },
-        ]
-        assert expected == sut.dump()
-
-    def test_dump_without_constraint_without_entity_references(self) -> None:
-        sut = EntityReferenceCollection()
-        expected = Void
-        assert expected == sut.dump()
+    def get_configurations(self) -> Tuple[EntityReference, EntityReference, EntityReference, EntityReference]:
+        return (
+            EntityReference(),
+            EntityReference(),
+            EntityReference(),
+            EntityReference(),
+        )
 
 
 class TestLocaleConfiguration:
@@ -257,101 +193,48 @@ class TestLocaleConfiguration:
         assert expected == (sut == other)
 
 
-class TestLocalesConfiguration:
-    def test_getitem(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-        ])
-        with assert_in_scope(sut):
-            assert locale_configuration_a == sut['nl-NL']
+class TestLocaleConfigurationMapping(ConfigurationMappingTestBase):
+    _ConfigurationKeyT = str
+    _ConfigurationT = LocaleConfiguration
+    _CONFIGURATION_KEYS = ('en', 'nl', 'uk', 'fr')
+
+    def get_sut(self, configurations: Optional[Iterable[LocaleConfiguration]] = None) -> LocaleConfigurationMapping:
+        return LocaleConfigurationMapping(configurations)
+
+    def get_configurations(self) -> Tuple[LocaleConfiguration, LocaleConfiguration, LocaleConfiguration, LocaleConfiguration]:
+        return (
+            LocaleConfiguration(self._CONFIGURATION_KEYS[0]),
+            LocaleConfiguration(self._CONFIGURATION_KEYS[1]),
+            LocaleConfiguration(self._CONFIGURATION_KEYS[2]),
+            LocaleConfiguration(self._CONFIGURATION_KEYS[3]),
+        )
 
     def test_delitem(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-            locale_configuration_b,
-        ])
+        configurations = self.get_configurations()
+        sut = self.get_sut([configurations[0], configurations[1]])
         with assert_scope_empty():
             with assert_reactor_called(sut):
-                del sut['nl-NL']
-        assert [locale_configuration_b] == list(sut)
+                del sut[self._CONFIGURATION_KEYS[1]]
+        assert [configurations[0]] == list(sut.values())
+        assert [] == list(configurations[1].react._reactors)
 
     def test_delitem_with_one_remaining_locale_configuration(self) -> None:
         locale_configuration_a = LocaleConfiguration('nl-NL')
-        sut = LocaleConfigurationCollection([
+        sut = LocaleConfigurationMapping([
             locale_configuration_a,
         ])
         with App():
             with pytest.raises(ConfigurationValidationError):
                 del sut['nl-NL']
 
-    def test_iter(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-            locale_configuration_b,
-        ])
-        with assert_in_scope(sut):
-            assert [locale_configuration_a, locale_configuration_b] == list(iter(sut))
-
-    def test_len(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-            locale_configuration_b,
-        ])
-        with assert_in_scope(sut):
-            assert 2 == len(sut)
-
-    def test_eq(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-            locale_configuration_b,
-        ])
-        other = LocaleConfigurationCollection([
-            locale_configuration_a,
-            locale_configuration_b,
-        ])
-        with assert_in_scope(sut):
-            assert other == sut
-
-    def test_contains(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-        ])
-        with assert_in_scope(sut):
-            assert 'nl-NL' in sut
-            assert 'en-US' not in sut
-
-    def test_repr(self) -> None:
-        locale_configuration_a = LocaleConfiguration('nl-NL')
-        sut = LocaleConfigurationCollection([
-            locale_configuration_a,
-        ])
-        with assert_in_scope(sut):
-            assert isinstance(repr(sut), str)
-
-    def test_add(self) -> None:
-        sut = LocaleConfigurationCollection()
-        with assert_scope_empty():
-            with assert_reactor_called(sut):
-                sut.add(LocaleConfiguration('nl-NL'))
-
     def test_default_without_explicit_locale_configurations(self):
-        sut = LocaleConfigurationCollection()
+        sut = LocaleConfigurationMapping()
         assert LocaleConfiguration('en-US') == sut.default
 
     def test_default_without_explicit_default(self):
         locale_configuration_a = LocaleConfiguration('nl-NL')
         locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
+        sut = LocaleConfigurationMapping([
             locale_configuration_a,
             locale_configuration_b,
         ])
@@ -360,7 +243,7 @@ class TestLocalesConfiguration:
     def test_default_with_explicit_default(self):
         locale_configuration_a = LocaleConfiguration('nl-NL')
         locale_configuration_b = LocaleConfiguration('en-US')
-        sut = LocaleConfigurationCollection([
+        sut = LocaleConfigurationMapping([
             locale_configuration_a,
         ])
         sut.default = locale_configuration_b
@@ -418,29 +301,29 @@ class TestExtensionConfiguration:
         assert expected == (one == other)
 
 
-class ExtensionTypeConfigurationMapTestExtension0(Extension):
+class ExtensionTypeConfigurationMappingTestExtension0(Extension):
     pass
 
 
-class ExtensionTypeConfigurationMapTestExtension1(Extension):
+class ExtensionTypeConfigurationMappingTestExtension1(Extension):
     pass
 
 
-class ExtensionTypeConfigurationMapTestExtension2(Extension):
+class ExtensionTypeConfigurationMappingTestExtension2(Extension):
     pass
 
 
-class ExtensionTypeConfigurationMapTestExtension3(Extension):
+class ExtensionTypeConfigurationMappingTestExtension3(Extension):
     pass
 
 
-class TestExtensionConfigurationMap(ConfigurationMapTestBase):
+class TestExtensionConfigurationMapping(ConfigurationMappingTestBase):
     _ConfigurationKeyT = Type[Extension]
     _ConfigurationT = ExtensionConfiguration
-    _CONFIGURATION_KEYS = (ExtensionTypeConfigurationMapTestExtension0, ExtensionTypeConfigurationMapTestExtension1, ExtensionTypeConfigurationMapTestExtension2, ExtensionTypeConfigurationMapTestExtension3)
+    _CONFIGURATION_KEYS = (ExtensionTypeConfigurationMappingTestExtension0, ExtensionTypeConfigurationMappingTestExtension1, ExtensionTypeConfigurationMappingTestExtension2, ExtensionTypeConfigurationMappingTestExtension3)
 
-    def get_sut(self, configurations: Optional[Iterable[ExtensionConfiguration]] = None) -> ExtensionConfigurationMap:
-        return ExtensionConfigurationMap(configurations)
+    def get_sut(self, configurations: Optional[Iterable[ExtensionConfiguration]] = None) -> ExtensionConfigurationMapping:
+        return ExtensionConfigurationMapping(configurations)
 
     def get_configurations(self) -> Tuple[ExtensionConfiguration, ExtensionConfiguration, ExtensionConfiguration, ExtensionConfiguration]:
         return (
@@ -516,29 +399,29 @@ class TestEntityTypeConfiguration:
         assert expected == (one == other)
 
 
-class EntityTypeConfigurationMapTestEntity0(Entity):
+class EntityTypeConfigurationMappingTestEntity0(Entity):
     pass
 
 
-class EntityTypeConfigurationMapTestEntity1(Entity):
+class EntityTypeConfigurationMappingTestEntity1(Entity):
     pass
 
 
-class EntityTypeConfigurationMapTestEntity2(Entity):
+class EntityTypeConfigurationMappingTestEntity2(Entity):
     pass
 
 
-class EntityTypeConfigurationMapTestEntity3(Entity):
+class EntityTypeConfigurationMappingTestEntity3(Entity):
     pass
 
 
-class TestEntityTypeConfigurationMap(ConfigurationMapTestBase):
+class TestEntityTypeConfigurationMapping(ConfigurationMappingTestBase):
     _ConfigurationKeyT = Type[Entity]
     _ConfigurationT = EntityTypeConfiguration
-    _CONFIGURATION_KEYS = (EntityTypeConfigurationMapTestEntity0, EntityTypeConfigurationMapTestEntity1, EntityTypeConfigurationMapTestEntity2, EntityTypeConfigurationMapTestEntity3)
+    _CONFIGURATION_KEYS = (EntityTypeConfigurationMappingTestEntity0, EntityTypeConfigurationMappingTestEntity1, EntityTypeConfigurationMappingTestEntity2, EntityTypeConfigurationMappingTestEntity3)
 
-    def get_sut(self, configurations: Optional[Iterable[EntityTypeConfiguration]] = None) -> EntityTypeConfigurationMap:
-        return EntityTypeConfigurationMap(configurations)
+    def get_sut(self, configurations: Optional[Iterable[EntityTypeConfiguration]] = None) -> EntityTypeConfigurationMapping:
+        return EntityTypeConfigurationMapping(configurations)
 
     def get_configurations(self) -> Tuple[EntityTypeConfiguration, EntityTypeConfiguration, EntityTypeConfiguration, EntityTypeConfiguration]:
         return (
@@ -647,7 +530,7 @@ class TestProjectConfiguration:
         sut = ProjectConfiguration()
         with raises_no_configuration_errors() as loader:
             sut.load(dumped_configuration, loader)
-        assert LocaleConfigurationCollection([LocaleConfiguration(locale)]) == sut.locales
+        assert LocaleConfigurationMapping([LocaleConfiguration(locale)]) == sut.locales
 
     def test_load_should_load_locale_alias(self) -> None:
         locale = 'nl-NL'
@@ -662,7 +545,7 @@ class TestProjectConfiguration:
         sut = ProjectConfiguration()
         with raises_no_configuration_errors() as loader:
             sut.load(dumped_configuration, loader)
-        assert LocaleConfigurationCollection([LocaleConfiguration(locale, alias)]) == sut.locales
+        assert LocaleConfigurationMapping([LocaleConfiguration(locale, alias)]) == sut.locales
 
     def test_load_should_root_path(self) -> None:
         configured_root_path = '/betty/'
@@ -807,29 +690,28 @@ class TestProjectConfiguration:
         locale = 'nl-NL'
         locale_configuration = LocaleConfiguration(locale)
         sut = ProjectConfiguration()
-        sut.locales.replace([locale_configuration])
+        sut.locales.append(locale_configuration)
+        sut.locales.remove('en-US')
         dumped_configuration: Any = sut.dump()
         assert dumped_configuration is not Void
-        assert [
-            {
-                'locale': locale,
-            },
-        ] == dumped_configuration['locales']
+        assert {
+            locale: {},
+        } == dumped_configuration['locales']
 
     def test_dump_should_dump_locale_alias(self) -> None:
         locale = 'nl-NL'
         alias = 'nl'
         locale_configuration = LocaleConfiguration(locale, alias)
         sut = ProjectConfiguration()
-        sut.locales.replace([locale_configuration])
+        sut.locales.append(locale_configuration)
+        sut.locales.remove('en-US')
         dumped_configuration: Any = sut.dump()
         assert dumped_configuration is not Void
-        assert [
-            {
-                'locale': locale,
+        assert {
+            locale: {
                 'alias': alias,
             },
-        ] == dumped_configuration['locales']
+        } == dumped_configuration['locales']
 
     def test_dump_should_dump_root_path(self) -> None:
         root_path = 'betty'
@@ -915,7 +797,7 @@ class DummyConfigurableExtensionConfiguration(Configuration):
         return self.check == other.check and self.default == other.default
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        with loader.assert_required_key(
+        with loader.assert_field(
             dumped_configuration,
             'check',
             loader.assert_int,  # type: ignore

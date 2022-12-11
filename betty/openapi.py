@@ -215,7 +215,7 @@ def build_specification(app: App) -> Dict:
             'description': _('A locale name.'),
             'schema': {
                 'type': 'string',
-                'enum': [locale_configuration.locale for locale_configuration in app.project.configuration.locales],
+                'enum': [locale for locale in app.project.configuration.locales],
             },
             'example': app.project.configuration.locales[app.project.configuration.locales.default.locale].alias,
         }

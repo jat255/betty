@@ -8,7 +8,7 @@ import pytest
 from reactives.tests import assert_reactor_called, assert_in_scope, assert_scope_empty
 
 from betty.app import App
-from betty.config import FileBasedConfiguration, ConfigurationMap, Configuration, DumpedConfigurationExport, \
+from betty.config import FileBasedConfiguration, ConfigurationMapping, Configuration, DumpedConfigurationExport, \
     DumpedConfigurationImport, ConfigurationSequence, ConfigurationCollection
 from betty.config.error import ConfigurationError, ConfigurationErrorCollection
 from betty.config.load import ConfigurationFormatError, Loader
@@ -105,7 +105,7 @@ class ConfigurationCollectionTestBase:
     _ConfigurationT: Type[Configuration]
     _CONFIGURATION_KEYS: Tuple[_ConfigurationKeyT, _ConfigurationKeyT, _ConfigurationKeyT, _ConfigurationKeyT]
 
-    def get_sut(self, configurations: _ConfigurationKeyT = None) -> ConfigurationCollection[_ConfigurationKeyT, _ConfigurationT]:
+    def get_sut(self, configurations: Optional[Iterable[_ConfigurationKeyT]] = None) -> ConfigurationCollection[_ConfigurationKeyT, _ConfigurationT]:
         raise NotImplementedError
 
     def get_configurations(self) -> Tuple[_ConfigurationT, _ConfigurationT, _ConfigurationT, _ConfigurationT]:
@@ -115,7 +115,19 @@ class ConfigurationCollectionTestBase:
         configuration = self.get_configurations()[0]
         sut = self.get_sut([configuration])
         with assert_in_scope(sut):
-            assert [configuration] == list(sut)
+            assert [configuration] == list(sut.values())
+
+    def test_keys(self) -> None:
+        configurations = self.get_configurations()
+        sut = self.get_sut(configurations)
+        with assert_in_scope(sut):
+            assert [*self._CONFIGURATION_KEYS] == list(sut.keys())
+
+    def test_values(self) -> None:
+        configurations = self.get_configurations()
+        sut = self.get_sut(configurations)
+        with assert_in_scope(sut):
+            assert [*configurations] == list(sut.values())
 
     def test_delitem(self) -> None:
         configuration = self.get_configurations()[0]
@@ -123,17 +135,11 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 del sut[self._CONFIGURATION_KEYS[0]]
-        assert [] == list(sut)
+        assert [] == list(sut.values())
         assert [] == list(configuration.react._reactors)
 
     def test_iter(self) -> None:
-        configurations = self.get_configurations()
-        sut = self.get_sut([
-            configurations[0],
-            configurations[1],
-        ])
-        with assert_in_scope(sut):
-            assert [configurations[0], configurations[1]] == list(iter(sut))
+        raise NotImplementedError
 
     def test_len(self) -> None:
         configurations = self.get_configurations()
@@ -165,7 +171,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.prepend(configurations[0])
-        assert [configurations[0], configurations[1]] == list(sut)
+        assert [configurations[0], configurations[1]] == list(sut.values())
         with assert_reactor_called(sut):
             configurations[0].react.trigger()
 
@@ -177,7 +183,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.append(configurations[1], configurations[2])
-        assert [configurations[0], configurations[1], configurations[2]] == list(sut)
+        assert [configurations[0], configurations[1], configurations[2]] == list(sut.values())
         with assert_reactor_called(sut):
             configurations[0].react.trigger()
 
@@ -190,7 +196,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.insert(1, configurations[2], configurations[3])
-        assert [configurations[0], configurations[2], configurations[3], configurations[1]] == list(sut)
+        assert [configurations[0], configurations[2], configurations[3], configurations[1]] == list(sut.values())
         with assert_reactor_called(sut):
             configurations[0].react.trigger()
 
@@ -200,7 +206,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.move_to_beginning(self._CONFIGURATION_KEYS[2], self._CONFIGURATION_KEYS[3])
-        assert [configurations[2], configurations[3], configurations[0], configurations[1]] == list(sut)
+        assert [configurations[2], configurations[3], configurations[0], configurations[1]] == list(sut.values())
 
     def test_move_towards_beginning(self) -> None:
         configurations = self.get_configurations()
@@ -208,7 +214,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.move_towards_beginning(self._CONFIGURATION_KEYS[2], self._CONFIGURATION_KEYS[3])
-        assert [configurations[0], configurations[2], configurations[3], configurations[1]] == list(sut)
+        assert [configurations[0], configurations[2], configurations[3], configurations[1]] == list(sut.values())
 
     def test_move_to_end(self) -> None:
         configurations = self.get_configurations()
@@ -216,7 +222,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.move_to_end(self._CONFIGURATION_KEYS[0], self._CONFIGURATION_KEYS[1])
-        assert [configurations[2], configurations[3], configurations[0], configurations[1]] == list(sut)
+        assert [configurations[2], configurations[3], configurations[0], configurations[1]] == list(sut.values())
 
     def test_move_towards_end(self) -> None:
         configurations = self.get_configurations()
@@ -224,7 +230,7 @@ class ConfigurationCollectionTestBase:
         with assert_scope_empty():
             with assert_reactor_called(sut):
                 sut.move_towards_end(self._CONFIGURATION_KEYS[0], self._CONFIGURATION_KEYS[1])
-        assert [configurations[2], configurations[0], configurations[1], configurations[3]] == list(sut)
+        assert [configurations[2], configurations[0], configurations[1], configurations[3]] == list(sut.values())
 
 
 class ConfigurationSequenceTestBase(ConfigurationCollectionTestBase):
@@ -235,6 +241,15 @@ class ConfigurationSequenceTestBase(ConfigurationCollectionTestBase):
         sut = self.get_sut()
         configuration = sut._default_configuration_item()
         assert isinstance(configuration, Configuration)
+
+    def test_iter(self) -> None:
+        configurations = self.get_configurations()
+        sut = self.get_sut([
+            configurations[0],
+            configurations[1],
+        ])
+        with assert_in_scope(sut):
+            assert [configurations[0], configurations[1]] == list(iter(sut))
 
 
 class ConfigurationSequenceTestConfigurationSequence(ConfigurationSequence[ConfigurationCollectionTestConfiguration]):
@@ -255,7 +270,7 @@ class TestConfigurationSequence(ConfigurationSequenceTestBase):
         )
 
 
-class ConfigurationMapTestBase(ConfigurationCollectionTestBase):
+class ConfigurationMappingTestBase(ConfigurationCollectionTestBase):
     def test_abstract_methods(self) -> None:
         sut = self.get_sut()
         configuration_key = self._CONFIGURATION_KEYS[0]
@@ -264,15 +279,25 @@ class ConfigurationMapTestBase(ConfigurationCollectionTestBase):
         assert configuration_key == sut._get_key(configuration)
         dumped_configuration_key = sut._dump_key(configuration_key)
         assert isinstance(dumped_configuration_key, str)
-        loaded_configuration_key = sut._load_key(dumped_configuration_key)
+        with raises_no_configuration_errors() as loader:
+            loaded_configuration_key = sut._load_key(dumped_configuration_key, loader)
         assert configuration_key == loaded_configuration_key
 
+    def test_iter(self) -> None:
+        configurations = self.get_configurations()
+        sut = self.get_sut([
+            configurations[0],
+            configurations[1],
+        ])
+        with assert_in_scope(sut):
+            assert [self._CONFIGURATION_KEYS[0], self._CONFIGURATION_KEYS[1]] == list(iter(sut))
 
-class ConfigurationMapTestConfigurationMap(ConfigurationMap[str, ConfigurationCollectionTestConfiguration]):
+
+class ConfigurationMappingTestConfigurationMapping(ConfigurationMapping[str, ConfigurationCollectionTestConfiguration]):
     def _get_key(self, configuration: ConfigurationCollectionTestConfiguration) -> str:
         return configuration.key
 
-    def _load_key(self, dumped_configuration_key: str) -> str:
+    def _load_key(self, dumped_configuration_key: str, loader: Loader) -> Optional[str]:
         return dumped_configuration_key
 
     def _dump_key(self, configuration_key: str) -> str:
@@ -282,13 +307,13 @@ class ConfigurationMapTestConfigurationMap(ConfigurationMap[str, ConfigurationCo
         return ConfigurationCollectionTestConfiguration('foo', 123)
 
 
-class TestConfigurationMap(ConfigurationMapTestBase):
+class TestConfigurationMapping(ConfigurationMappingTestBase):
     _ConfigurationKeyT = str
     _ConfigurationT = ConfigurationCollectionTestConfiguration
     _CONFIGURATION_KEYS = ('foo', 'bar', 'baz', 'qux')
 
-    def get_sut(self, configurations: Optional[Iterable[ConfigurationCollectionTestConfiguration]] = None) -> ConfigurationMapTestConfigurationMap:
-        return ConfigurationMapTestConfigurationMap(configurations)
+    def get_sut(self, configurations: Optional[Iterable[ConfigurationCollectionTestConfiguration]] = None) -> ConfigurationMappingTestConfigurationMapping:
+        return ConfigurationMappingTestConfigurationMapping(configurations)
 
     def get_configurations(self) -> Tuple[ConfigurationCollectionTestConfiguration, ConfigurationCollectionTestConfiguration, ConfigurationCollectionTestConfiguration, ConfigurationCollectionTestConfiguration]:
         return (

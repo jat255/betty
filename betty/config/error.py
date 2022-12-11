@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from textwrap import indent
-from typing import Iterator, Generic, TypeVar, Tuple, cast
+from typing import Iterator, Generic, TypeVar, Tuple, cast, Optional
 
 from betty.classtools import Repr
 from betty.error import UserFacingError
@@ -65,6 +66,14 @@ class ConfigurationErrorCollection(ConfigurationError, Generic[ConfigurationErro
     def valid(self) -> bool:
         return len(self._errors) == 0
 
+    @property
+    def invalid(self) -> bool:
+        return not self.valid
+
+    def assert_valid(self) -> None:
+        if self.invalid:
+            raise self
+
     def with_context(self, *contexts: str) -> ConfigurationErrorCollection:
         self_copy = cast(ConfigurationErrorCollection, super().with_context(*contexts))
         self_copy._errors = [error.with_context(*contexts) for error in self._errors]
@@ -73,3 +82,21 @@ class ConfigurationErrorCollection(ConfigurationError, Generic[ConfigurationErro
     def append(self, *errors: ConfigurationErrorT) -> None:
         for error in errors:
             self._errors.append(error.with_context(*self._contexts))
+
+    @contextmanager
+    def catch(self) -> Iterator[None]:
+        try:
+            yield
+        except ConfigurationErrorT as e:
+            self.append(e)
+
+    @contextmanager
+    def context(self, context: Optional[str] = None) -> Iterator[ConfigurationErrorCollection]:
+        context_errors: ConfigurationErrorCollection = ConfigurationErrorCollection()
+        if context:
+            context_errors = context_errors.with_context(context)
+        previous_errors = self._errors
+        self._errors = context_errors
+        yield context_errors
+        self._errors = previous_errors
+        self.append(*context_errors)

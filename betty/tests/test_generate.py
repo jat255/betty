@@ -34,10 +34,8 @@ def assert_betty_json(app: App, url_path: str, schema_definition: str) -> Path:
 class TestGenerate:
     async def test_html_lang(self):
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('en-US', 'en'),
-            LocaleConfiguration('nl-NL', 'nl'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.append(LocaleConfiguration('nl-NL', 'nl'))
         with app:
             await generate(app)
             with open(assert_betty_html(app, '/nl/index.html')) as f:
@@ -46,10 +44,8 @@ class TestGenerate:
 
     async def test_root_redirect(self):
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('nl'),
-            LocaleConfiguration('en'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.insert(0, LocaleConfiguration('nl-NL', 'nl'))
         with app:
             await generate(app)
         with open(assert_betty_html(app, '/index.html')) as f:
@@ -58,10 +54,8 @@ class TestGenerate:
 
     async def test_links(self):
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('nl'),
-            LocaleConfiguration('en'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.insert(0, LocaleConfiguration('nl-NL', 'nl'))
         with app:
             await generate(app)
         with open(assert_betty_html(app, '/nl/index.html')) as f:
@@ -75,10 +69,8 @@ class TestGenerate:
 
     async def test_links_for_entity_pages(self):
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('nl'),
-            LocaleConfiguration('en'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.insert(0, LocaleConfiguration('nl-NL', 'nl'))
         with app:
             person = Person('PERSON1')
             app.project.ancestry.entities.append(person)

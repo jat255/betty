@@ -55,10 +55,8 @@ class TestLocalizedPathUrlGenerator:
 
     def test_generate_multilingual(self):
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('nl'),
-            LocaleConfiguration('en'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.insert(0, LocaleConfiguration('nl-NL', 'nl'))
         with app:
             sut = ContentNegotiationPathUrlGenerator(app)
             with app.acquire_locale('nl'):

@@ -66,7 +66,7 @@ async def _generate(app: App) -> None:
         in app.entity_types
         if issubclass(entity_type, UserFacingEntity)
     ]
-    for locale_configuration in app.project.configuration.locales:
+    for locale_configuration in app.project.configuration.locales.values():
         locale = locale_configuration.locale
         with app.acquire_locale(locale):
             if app.project.configuration.multilingual:

@@ -86,17 +86,17 @@ class JSONEncoder(stdjson.JSONEncoder):
             encoded['links'].append(canonical)
 
             link_urls = [link.url for link in encoded['links']]
-            for locale_configuration in self._app.project.configuration.locales:
-                if locale_configuration.locale == self._app.locale:
+            for locale in self._app.project.configuration.locales:
+                if locale == self._app.locale:
                     continue
-                with self._app.acquire_locale(locale_configuration.locale):
+                with self._app.acquire_locale(locale):
                     link_url = self._generate_url(entity)
                     if link_url in link_urls:
                         continue
                     link_urls.append(link_url)
                     translation = Link(link_url)
                 translation.relationship = 'alternate'
-                translation.locale = locale_configuration.locale
+                translation.locale = locale
                 encoded['links'].append(translation)
 
             html = Link(self._generate_url(entity, media_type='text/html'))

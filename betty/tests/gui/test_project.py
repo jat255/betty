@@ -153,8 +153,10 @@ class TestLocalizationPane:
     def test_remove_locale(self, qtbot: QtBot) -> None:
         locale = 'de-DE'
         with App() as app:
-            app.project.configuration.locales.add(LocaleConfiguration('nl-NL'))
-            app.project.configuration.locales.add(LocaleConfiguration(locale))
+            app.project.configuration.locales.append(
+                LocaleConfiguration('nl-NL'),
+                LocaleConfiguration(locale),
+            )
             sut = _LocalizationPane(app)
             qtbot.addWidget(sut)
             sut.show()
@@ -168,8 +170,10 @@ class TestLocalizationPane:
     def test_default_locale(self, qtbot: QtBot) -> None:
         locale = 'de-DE'
         with App() as app:
-            app.project.configuration.locales.add(LocaleConfiguration('nl-NL'))
-            app.project.configuration.locales.add(LocaleConfiguration(locale))
+            app.project.configuration.locales.append(
+                LocaleConfiguration('nl-NL'),
+                LocaleConfiguration(locale),
+            )
             sut = _LocalizationPane(app)
             qtbot.addWidget(sut)
             sut.show()

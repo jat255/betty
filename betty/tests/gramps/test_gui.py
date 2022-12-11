@@ -4,7 +4,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog
 from pytest_mock import MockerFixture
 from pytestqt.qtbot import QtBot
-from reactives import ReactiveList
 
 from betty.app import App
 from betty.gramps import Gramps, GrampsConfiguration
@@ -62,9 +61,9 @@ def test_remove_family_tree(qtbot) -> None:
         app.project.configuration.extensions.append(ExtensionConfiguration(
             Gramps,
             extension_configuration=GrampsConfiguration(
-                family_trees=ReactiveList([
+                family_trees=[
                     FamilyTreeConfiguration('/tmp/family-tree.gpkg'),
-                ])
+                ]
             ),
         ))
         sut = app.extensions[Gramps]

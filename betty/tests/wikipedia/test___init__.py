@@ -385,10 +385,8 @@ class TestPopulator:
         link_en = Link('https://en.wikipedia.org/wiki/Amsterdam')
         resource.links.add(link_en)
         app = App()
-        app.project.configuration.locales.replace([
-            LocaleConfiguration('en-US', 'en'),
-            LocaleConfiguration('nl-NL', 'nl'),
-        ])
+        app.project.configuration.locales['en-US'].alias = 'en'
+        app.project.configuration.locales.append(LocaleConfiguration('nl-NL', 'nl'))
         with app:
             app.project.ancestry.entities.append(resource)
             sut = _Populator(app, m_retriever)

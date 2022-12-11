@@ -13,13 +13,12 @@ from betty.app.extension import ConfigurableExtension, Theme
 from betty.config import Configuration, DumpedConfigurationImport, DumpedConfigurationExport
 from betty.config.dump import minimize_dict
 from betty.config.load import ConfigurationValidationError, Loader, Field
-from betty.config.validate import validate
 from betty.cotton_candy.search import Index
 from betty.generate import Generator
 from betty.gui import GuiBuilder
 from betty.jinja2 import Jinja2Provider
 from betty.npm import _Npm, NpmBuilder, npm
-from betty.project import EntityReferenceCollection
+from betty.project import EntityReferenceSequence
 
 if TYPE_CHECKING:
     from betty.builtins import _
@@ -33,19 +32,15 @@ class _ColorConfiguration(Configuration):
         self._hex: str
         self.hex = hex_value
 
-    def _validate_hex(self, hex_value: str) -> str:
-        if not self._HEX_PATTERN.match(hex_value):
-            raise ConfigurationValidationError(_('"{hex_value}" is not a valid hexadecimal color, such as #ffc0cb.').format(hex_value=hex_value))
-        return hex_value
-
     @reactive  # type: ignore
     @property
     def hex(self) -> str:
         return self._hex
 
     @hex.setter
-    @validate(_validate_hex)
     def hex(self, hex_value: str) -> None:
+        if not self._HEX_PATTERN.match(hex_value):
+            raise ConfigurationValidationError(_('"{hex_value}" is not a valid hexadecimal color, such as #ffc0cb.').format(hex_value=hex_value))
         self._hex = hex_value
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
@@ -64,7 +59,7 @@ class CottonCandyConfiguration(Configuration):
 
     def __init__(self):
         super().__init__()
-        self._featured_entities = EntityReferenceCollection()
+        self._featured_entities = EntityReferenceSequence()
         self._featured_entities.react(self)
         self._primary_inactive_color = _ColorConfiguration(self.DEFAULT_PRIMARY_INACTIVE_COLOR)
         self._primary_inactive_color.react(self)
@@ -76,7 +71,7 @@ class CottonCandyConfiguration(Configuration):
         self._link_active_color.react(self)
 
     @property
-    def featured_entities(self) -> EntityReferenceCollection:
+    def featured_entities(self) -> EntityReferenceSequence:
         return self._featured_entities
 
     @property

@@ -252,7 +252,7 @@ class _LocalizationPane(LocalizedWidget):
         self._layout.insertWidget(0, self._locales_configuration_widget, alignment=Qt.AlignmentFlag.AlignTop)
 
         for i, locale_configuration in enumerate(sorted(
-                self._app.project.configuration.locales,
+                self._app.project.configuration.locales.values(),
                 key=lambda x: Locale.parse(bcp_47_to_rfc_1766(x.locale)).get_display_name(),
         )):
             self._build_locale_configuration(locale_configuration, i)
@@ -340,7 +340,7 @@ class _AddLocaleWindow(BettyWindow):
             alias = None
         try:
             with self._app.acquire_locale():
-                self._app.project.configuration.locales.add(LocaleConfiguration(locale, alias))
+                self._app.project.configuration.locales.append(LocaleConfiguration(locale, alias))
         except ConfigurationValidationError as e:
             mark_invalid(self._alias, str(e))
             return

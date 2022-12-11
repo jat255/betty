@@ -6,7 +6,7 @@ from reactives import reactive
 from betty.app import App
 from betty.gui.locale import LocalizedWidget
 from betty.model import UserFacingEntity
-from betty.project import EntityReference, EntityReferenceCollection
+from betty.project import EntityReference, EntityReferenceSequence
 
 if TYPE_CHECKING:
     from betty.builtins import _
@@ -24,7 +24,7 @@ class EntityReferenceCollector(LocalizedWidget):
         self._layout = QFormLayout()
         self.setLayout(self._layout)
 
-        if self._entity_reference.entity_type_constraint:
+        if self._entity_reference.entity_type_is_constrained:
             self._entity_type_label = QLabel()
         else:
             def _update_entity_type() -> None:
@@ -59,8 +59,8 @@ class EntityReferenceCollector(LocalizedWidget):
                 self._entity_id_label.setText(_('Entity ID'))
 
 
-class EntityReferenceCollectionCollector(LocalizedWidget):
-    def __init__(self, app: App, entity_references: EntityReferenceCollection, label_builder: Optional[Callable[[], str]] = None, caption_builder: Optional[Callable[[], str]] = None):
+class EntityReferenceSequenceCollector(LocalizedWidget):
+    def __init__(self, app: App, entity_references: EntityReferenceSequence, label_builder: Optional[Callable[[], str]] = None, caption_builder: Optional[Callable[[], str]] = None):
         super().__init__(app)
         self._entity_references = entity_references
         self._label_builder = label_builder

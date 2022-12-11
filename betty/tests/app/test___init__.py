@@ -29,7 +29,7 @@ class ConfigurableExtensionConfiguration(Configuration):
         self.check = check
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        with loader.assert_required_key(
+        with loader.assert_field(
             dumped_configuration,
             'check',
             loader.assert_int,  # type: ignore

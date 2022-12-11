@@ -5,37 +5,36 @@ from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, TypeVar, Generic, Optional, Iterable, List, Union, SupportsIndex, Hashable
+from typing import Dict, TypeVar, Generic, Optional, Iterable, List, Union, SupportsIndex, Hashable, Iterator, Callable, \
+    Type, Tuple
 
 from reactives import reactive, scope
 from reactives.factory.type import ReactiveInstance
 
 from betty.classtools import Repr, repr_instance
 from betty.config.dump import DumpedConfigurationImport, DumpedConfigurationExport, \
-    DumpedConfigurationDict, minimize_dict, minimize_list
+    DumpedConfigurationDict, minimize_dict, minimize_list, DumpedConfigurationImportT
+from betty.config.error import ConfigurationErrorCollection
 from betty.config.format import FORMATS_BY_EXTENSION, EXTENSIONS
-from betty.config.load import ConfigurationFormatError, Loader, ConfigurationLoadError
+from betty.config.load import ConfigurationFormatError, ConfigurationLoadError, assert_mapping, assert_dict, Assertions, \
+    assert_list, assert_sequence
 from betty.os import PathLike, ChDir
 
 try:
-    from typing_extensions import TypeAlias, TypeGuard
+    from typing_extensions import Self, TypeAlias, TypeGuard
 except ModuleNotFoundError:
-    from typing import TypeAlias, TypeGuard  # type: ignore
+    from typing import Self, TypeAlias, TypeGuard  # type: ignore
 
 
 @reactive
 class Configuration(ReactiveInstance, Repr):
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
+    def update(self, other: Self) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
         """
-        Validate the dumped configuration and prepare to load it into self.
-
-        Implementations MUST:
-        - Use the loader to set configuration errors
-        - Use the loader to register callbacks that make the actual configuration updates
-
-        Implementations MUST NOT:
-        - Raise configuration errors
-        - Update their own state as a direct result of this method being called
+        Load dumped configuration into a new configuration instance.
         """
 
         raise NotImplementedError
@@ -103,15 +102,16 @@ class FileBasedConfiguration(Configuration):
         else:
             self.configuration_file_path = configuration_file_path
 
+        errors = ConfigurationErrorCollection()
         # Change the working directory to allow relative paths to be resolved against the configuration file's directory
         # path.
         with ChDir(self.configuration_file_path.parent):
             with open(self.configuration_file_path) as f:
                 read_configuration = f.read()
-            loader = Loader()
-            with loader.context('in %s' % self.configuration_file_path.resolve()):
-                self.load(FORMATS_BY_EXTENSION[self.configuration_file_path.suffix[1:]].load(read_configuration), loader)
-        loader.commit()
+            with errors.context('in %s' % self.configuration_file_path.resolve()):
+                configuration = self.load(FORMATS_BY_EXTENSION[self.configuration_file_path.suffix[1:]].load(read_configuration), errors)
+        errors.assert_valid()
+        self.update(configuration)
 
     def __del__(self):
         if hasattr(self, '_project_directory') and self._project_directory is not None:
@@ -154,19 +154,12 @@ class ConfigurationCollection(Configuration, Generic[ConfigurationKeyT, Configur
         if configurations is not None:
             self.append(*configurations)
 
-    def __contains__(self, item) -> bool:
-        return item in self._configurations
-
     @scope.register_self
     def __getitem__(self, configuration_key: ConfigurationKeyT) -> ConfigurationT:
         return self._configurations[configuration_key]
 
     def __delitem__(self, configuration_key: ConfigurationKeyT) -> None:
         self.remove(configuration_key)
-
-    @scope.register_self
-    def __iter__(self) -> Iterable[ConfigurationT]:
-        raise NotImplementedError
 
     @scope.register_self
     def __len__(self) -> int:
@@ -176,17 +169,40 @@ class ConfigurationCollection(Configuration, Generic[ConfigurationKeyT, Configur
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return NotImplemented
-        return self._configurations == other._configurations
+        if list(self.keys()) != list(other.keys()):
+            return False
+        if list(self.values()) != list(other.values()):
+            return False
+        return True
+
+    def __repr__(self):
+        return repr_instance(self, configurations=list(self.values()))
 
     def remove(self, *configuration_keys: ConfigurationKeyT) -> None:
         for configuration_key in configuration_keys:
             with suppress(LookupError):
-                self._configurations[configuration_key].react.shutdown(self)
+                self._on_remove(self._configurations[configuration_key])
             del self._configurations[configuration_key]
         self.react.trigger()
 
     def clear(self) -> None:
-        self.remove(*self._configurations.keys())
+        self.remove(*self.keys())
+
+    def _on_add(self, configuration: ConfigurationT) -> None:
+        configuration.react(self)
+
+    def _on_remove(self, configuration: ConfigurationT) -> None:
+        configuration.react.shutdown(self)
+
+    @classmethod
+    def _item_type(cls) -> Type[ConfigurationT]:
+        raise NotImplementedError
+
+    def keys(self) -> Iterator[ConfigurationKeyT]:
+        raise NotImplementedError
+
+    def values(self) -> Iterator[ConfigurationT]:
+        raise NotImplementedError
 
     def prepend(self, *configurations: ConfigurationT) -> None:
         raise NotImplementedError
@@ -219,24 +235,20 @@ class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generi
     def __iter__(self) -> Iterable[ConfigurationT]:
         return (configuration for configuration in self._configurations)
 
-    def __repr__(self):
-        return repr_instance(self, configurations=self._configurations)
+    @scope.register_self
+    def keys(self) -> Iterator[int]:
+        return range(0, len(self._configurations))
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        if loader.assert_list(dumped_configuration):
-            loader.on_commit(self.clear)
-            loader.assert_sequence(
-                dumped_configuration,
-                self._load_configuration,  # type: ignore
-            )
+    @scope.register_self
+    def values(self) -> Iterator[ConfigurationT]:
+        yield from self._configurations
 
-    def _load_configuration(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        with loader.context() as errors:
-            with loader.catch():
-                configuration = self._default_configuration_item()
-                configuration.load(dumped_configuration, loader)
-                loader.on_commit(lambda: self.append(configuration))
-        return errors.valid
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        configuration = cls()
+        if assert_list()(dumped_configuration, errors):
+            configuration.append(*assert_sequence(Assertions(cls._item_type().load))(dumped_configuration))
+        return configuration
 
     def dump(self) -> DumpedConfigurationExport:
         return minimize_list([
@@ -244,25 +256,22 @@ class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generi
             for configuration in self._configurations
         ])
 
-    def _default_configuration_item(self) -> ConfigurationT:
-        raise NotImplementedError
-
     def prepend(self, *configurations: ConfigurationT) -> None:
         for configuration in configurations:
+            self._on_add(configuration)
             self._configurations.insert(0, configuration)
-            configuration.react(self)
         self.react.trigger()
 
     def append(self, *configurations: ConfigurationT) -> None:
         for configuration in configurations:
+            self._on_add(configuration)
             self._configurations.append(configuration)
-            configuration.react(self)
         self.react.trigger()
 
     def insert(self, index: int, *configurations: ConfigurationT) -> None:
         for configuration in reversed(configurations):
+            self._on_add(configuration)
             self._configurations.insert(index, configuration)
-            configuration.react(self)
         self.react.trigger()
 
     def move_to_beginning(self, *configuration_keys: int) -> None:
@@ -296,9 +305,10 @@ class ConfigurationSequence(ConfigurationCollection[int, ConfigurationT], Generi
         self.react.trigger()
 
 
-class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT], Generic[ConfigurationKeyT, ConfigurationT]):
-    def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None):
+class ConfigurationMapping(ConfigurationCollection[ConfigurationKeyT, ConfigurationT], Generic[ConfigurationKeyT, ConfigurationT]):
+    def __init__(self, configurations: Optional[Iterable[ConfigurationT]] = None, /, default_factory: Optional[Callable[[ConfigurationKeyT], ConfigurationT]] = None):
         self._configurations: OrderedDict = OrderedDict()
+        self._default_factory = default_factory
         super().__init__(configurations)
 
     @scope.register_self
@@ -306,54 +316,45 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
         try:
             return super().__getitem__(configuration_key)
         except KeyError:
-            item = self._default_configuration_item(configuration_key)
+            item = self._default_factory(configuration_key)
             self.append(item)
             return item
 
     @scope.register_self
     def __iter__(self) -> Iterable[ConfigurationT]:
-        return (configuration for configuration in self._configurations.values())
+        return (configuration for configuration in self._configurations.keys())
 
-    def __repr__(self):
-        return repr_instance(self, configurations=list(self._configurations.values()))
+    def _keys_without_scope(self) -> Iterator[ConfigurationKeyT]:
+        return (configuration_key for configuration_key in self._configurations.keys())
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        if loader.assert_dict(dumped_configuration):
-            loader.on_commit(self.clear)
-            loader.assert_mapping(
-                dumped_configuration,
-                self._load_configuration,  # type: ignore
-            )
+    @scope.register_self
+    def keys(self) -> Iterator[ConfigurationKeyT]:
+        return self._keys_without_scope()
 
-    def _load_configuration(self, dumped_configuration: DumpedConfigurationImport, loader: Loader, dumped_configuration_key: str) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        with loader.context() as errors:
-            with loader.catch():
-                configuration_key = self._load_key(dumped_configuration_key)
-                configuration = self._default_configuration_item(configuration_key)
-                configuration.load(dumped_configuration, loader)
-                loader.on_commit(lambda: self.append(configuration))
-        return errors.valid
+    @scope.register_self
+    def values(self) -> Iterator[ConfigurationT]:
+        yield from self._configurations.values()
+
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        configuration = cls()
+        if assert_dict()(dumped_configuration, errors):
+            configuration.append(*assert_mapping(Assertions(cls._item_type().load))(dumped_configuration, errors))
+        return configuration
+
+    @classmethod
+    def _load_configuration(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection, dumped_configuration_key: str) -> Optional[ConfigurationT]:
+        with errors.context() as item_errors:
+            with item_errors.catch():
+                if dumped_item := cls._load_key(dumped_configuration[dumped_configuration_key], item_errors, dumped_configuration_key):
+                    return cls._item_type().load(dumped_item, item_errors)
+        return item_errors.valid
 
     def dump(self) -> DumpedConfigurationExport:
         return minimize_dict({
             self._dump_key(self._get_key(configuration)): configuration.dump()
             for configuration in self._configurations.values()
         }, self._is_void_empty())
-
-    def _get_key(self, configuration: ConfigurationT) -> ConfigurationKeyT:
-        raise NotImplementedError
-
-    def _load_key(self, dumped_configuration_key: str) -> ConfigurationKeyT:
-        raise NotImplementedError
-
-    def _dump_key(self, configuration_key: ConfigurationKeyT) -> str:
-        raise NotImplementedError
-
-    def _default_configuration_item(self, configuration_key: ConfigurationKeyT) -> ConfigurationT:
-        raise NotImplementedError
-
-    def _is_void_empty(self) -> bool:
-        return False
 
     def prepend(self, *configurations: ConfigurationT) -> None:
         for configuration in configurations:
@@ -375,7 +376,7 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
 
     def _insert_without_trigger(self, index: int, *configurations: ConfigurationT) -> None:
         configurations = list(configurations)
-        current_configuration_keys = list(self._configurations.keys())
+        current_configuration_keys = list(self._keys_without_scope())
         self._append_without_trigger(*configurations)
         self._move_to_end_without_trigger(
             *current_configuration_keys[0:index],
@@ -400,22 +401,33 @@ class ConfigurationMap(ConfigurationCollection[ConfigurationKeyT, ConfigurationT
             self._configurations.move_to_end(configuration_key)
 
     def move_to_end(self, *configuration_keys: ConfigurationKeyT) -> None:
-        print(self._configurations)
         self._move_to_end_without_trigger(*configuration_keys)
-        print(self._configurations)
         self.react.trigger()
 
     def move_towards_end(self, *configuration_keys: ConfigurationKeyT) -> None:
         self._move_by_offset(1, *configuration_keys)
 
     def _move_by_offset(self, offset: int, *configuration_keys: ConfigurationKeyT) -> None:
-        current_configuration_keys = list(self._configurations.keys())
+        current_configuration_keys = list(self._keys_without_scope())
         ordered_current_configuration_keys = current_configuration_keys if offset < 0 else list(reversed(current_configuration_keys))
         for configuration_key in ordered_current_configuration_keys:
             if configuration_key in configuration_keys:
                 configuration_index = current_configuration_keys.index(configuration_key)
                 self._insert_without_trigger(configuration_index + offset, self._configurations.pop(configuration_key))
         self.react.trigger()
+
+    def _get_key(self, configuration: ConfigurationT) -> ConfigurationKeyT:
+        raise NotImplementedError
+
+    @classmethod
+    def _load_key(cls, dumped_item: DumpedConfigurationImport, errors: ConfigurationErrorCollection, dumped_key: str) -> DumpedConfigurationImport:
+        raise NotImplementedError
+
+    def _dump_key(self, dumped_item: DumpedConfigurationExport) -> Tuple[DumpedConfigurationExport, str]:
+        raise NotImplementedError
+
+    def _is_void_empty(self) -> bool:
+        return False
 
 
 class Configurable(Generic[ConfigurationT]):

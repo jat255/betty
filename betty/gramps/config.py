@@ -1,17 +1,13 @@
 from pathlib import Path
-from typing import Optional, List, Iterable
+from typing import Optional, Iterable, Type
 
-from reactives import reactive, ReactiveList
+from reactives import reactive
 
-from betty.config import Configuration, DumpedConfigurationImport, DumpedConfigurationExport, DumpedConfigurationDict
-from betty.config.dump import DumpedConfigurationList
+from betty.config import Configuration, DumpedConfigurationImport, DumpedConfigurationExport, ConfigurationSequence, \
+    ConfigurationT
+from betty.config.dump import minimize_dict
 from betty.config.load import Loader, Field
 from betty.os import PathLike
-
-try:
-    from typing_extensions import TypeGuard
-except ModuleNotFoundError:
-    from typing import TypeGuard  # type: ignore
 
 
 class FamilyTreeConfiguration(Configuration):
@@ -48,44 +44,31 @@ class FamilyTreeConfiguration(Configuration):
         }
 
 
+class FamilyTreeConfigurationSequence(ConfigurationSequence[FamilyTreeConfiguration]):
+    @classmethod
+    def _item_type(cls) -> Type[ConfigurationT]:
+        return FamilyTreeConfiguration
+
+
 class GrampsConfiguration(Configuration):
     def __init__(self, family_trees: Optional[Iterable[FamilyTreeConfiguration]] = None):
         super().__init__()
-        self._family_trees = ReactiveList()
+        self._family_trees = FamilyTreeConfigurationSequence(family_trees)
         self._family_trees.react(self)
-        if family_trees:
-            self._family_trees.extend(family_trees)
 
     @property
-    def family_trees(self) -> List[FamilyTreeConfiguration]:
+    def family_trees(self) -> FamilyTreeConfigurationSequence:
         return self._family_trees
 
     def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
         loader.assert_record(dumped_configuration, {
             'family_trees': Field(
                 True,
-                self._load_family_trees,  # type: ignore
+                self._family_trees.load,  # type: ignore
             ),
         })
 
-    def _load_family_trees(self, dumped_configuration, loader: Loader) -> TypeGuard[DumpedConfigurationList[DumpedConfigurationImport]]:
-        loader.on_commit(self._family_trees.clear)
-        return loader.assert_sequence(
-            dumped_configuration,
-            self._load_family_tree,  # type: ignore
-        )
-
-    def _load_family_tree(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        with loader.context() as errors:
-            family_tree_configuration = FamilyTreeConfiguration()
-            family_tree_configuration.load(dumped_configuration, loader)
-            loader.on_commit(lambda: self._family_trees.append(family_tree_configuration))
-        return errors.valid
-
     def dump(self) -> DumpedConfigurationExport:
-        return {
-            'family_trees': [
-                family_tree.dump()
-                for family_tree in self.family_trees
-            ]
-        }
+        return minimize_dict({
+            'family_trees': self.family_trees.dump(),
+        }, True)

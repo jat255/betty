@@ -1,70 +1,51 @@
 from __future__ import annotations
 
-from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Type, List, Iterable, Any, Sequence, cast
+from typing import TYPE_CHECKING, Optional, Type, List, cast, Iterable, Tuple, Any
 from urllib.parse import urlparse
 
-from babel.core import parse_locale, Locale
+from babel.core import Locale
 from reactives import reactive, scope
 
 from betty.app import Extension, ConfigurableExtension
-from betty.classtools import repr_instance
 from betty.config import Configuration, DumpedConfigurationImport, Configurable, FileBasedConfiguration, \
-    ConfigurationMap, DumpedConfigurationExport, DumpedConfigurationDict
-from betty.config.dump import minimize, minimize_dict
-from betty.config.load import ConfigurationValidationError, Loader, Field
-from betty.config.validate import validate, validate_positive_number
-from betty.importlib import import_any
+    ConfigurationMapping, DumpedConfigurationExport, DumpedConfigurationDict, ConfigurationSequence, ConfigurationT, \
+    ConfigurationErrorCollection
+from betty.config.dump import minimize_dict, void_none
+from betty.config.load import ConfigurationValidationError, Field, assert_entity_type, assert_dict, Assertions, \
+    assert_str, assert_setattr, assert_bool, assert_int, assert_record, Fields, ValueAssertion, \
+    assert_field
 from betty.locale import bcp_47_to_rfc_1766
-from betty.model import Entity, get_entity_type_name, UserFacingEntity, get_entity_type as model_get_entity_type, \
-    EntityTypeImportError, EntityTypeInvalidError, EntityTypeError
+from betty.model import Entity, get_entity_type_name, UserFacingEntity
 from betty.model.ancestry import Ancestry, Person, Event, Place, Source
 from betty.typing import Void
 
 try:
-    from typing_extensions import TypeGuard
+    from typing_extensions import Self, TypeGuard
 except ModuleNotFoundError:
-    from typing import TypeGuard  # type: ignore
+    from typing import Self, TypeGuard  # type: ignore
 
 if TYPE_CHECKING:
     from betty.builtins import _
 
 
-def get_entity_type(entity_type_definition: Any) -> Type[Entity]:
-    try:
-        return model_get_entity_type(entity_type_definition)
-    except EntityTypeImportError:
-        raise ConfigurationValidationError(_('Cannot find and import "{entity_type}".').format(
-            entity_type=str(entity_type_definition),
-        ))
-    except EntityTypeInvalidError:
-        raise ConfigurationValidationError(_('"{entity_type}" is not a valid Betty entity type.').format(
-            entity_type=str(entity_type_definition),
-        ))
-    except EntityTypeError:
-        raise ConfigurationValidationError(_('Cannot determine the entity type for "{entity_type}". Did you perhaps make a typo, or could it be that the entity type comes from another package that is not yet installed?').format(
-            entity_type=str(entity_type_definition),
-        ))
-
-
 class EntityReference(Configuration):
-    def __init__(self, entity_type: Optional[Type[Entity]] = None, entity_id: Optional[str] = None, /, entity_type_constraint: Optional[Type[Entity]] = None):
+    def __init__(self, entity_type: Optional[Type[Entity]] = None, entity_id: Optional[str] = None, /, entity_type_is_constrained: bool = False):
         super().__init__()
         self._entity_type = entity_type
         self._entity_id = entity_id
-        self._entity_type_constraint = entity_type_constraint
+        self._entity_type_is_constrained = entity_type_is_constrained
 
     @reactive  # type: ignore
     @property
     def entity_type(self) -> Optional[Type[Entity]]:
-        return self._entity_type or self._entity_type_constraint
+        return self._entity_type
 
     @entity_type.setter
-    def entity_type(self, entity_type: Type[Entity]) -> None:
-        if self._entity_type_constraint is not None:
-            raise AttributeError(f'The entity type cannot be set, as it is already constrained to {self._entity_type_constraint}.')
+    def entity_type(self, entity_type: Optional[Type[Entity]]) -> None:
+        if self._entity_type_is_constrained:
+            raise AttributeError(f'The entity type cannot be set, as it is already constrained to {self._entity_type}.')
         self._entity_type = entity_type
 
     @reactive  # type: ignore
@@ -81,43 +62,37 @@ class EntityReference(Configuration):
         self._entity_id = None
 
     @property
-    def entity_type_constraint(self) -> Optional[Type[Entity]]:
-        return self._entity_type_constraint
+    def entity_type_is_constrained(self) -> bool:
+        return self._entity_type_is_constrained
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        if self._entity_type_constraint is None:
-            loader.assert_record(dumped_configuration, {
-                'entity_type': Field(
-                    True,
-                    self._load_entity_type,  # type: ignore
-                ),
-                'entity_id': Field(
-                    True,
-                    loader.assert_str,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'entity_id', x),
-                ),
-            })
-        elif loader.assert_str(dumped_configuration):
-            loader.assert_setattr(self, 'entity_id', dumped_configuration)
+    def update(self, other: Self) -> None:
+        self.entity_type = other.entity_type
+        self._entity_type_is_constrained = other.entity_type_is_constrained
+        self.entity_id = other.entity_id
 
-    def _load_entity_type(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[str]:
-        with loader.context() as errors:
-            if loader.assert_str(dumped_configuration):
-                with loader.catch():
-                    loader.assert_setattr(self, 'entity_type', get_entity_type(dumped_configuration))
-        return errors.valid
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        configuration = cls()
+        if isinstance(dumped_configuration, dict):
+            assert_record(Fields(
+                Field('entity_type', True, Assertions(assert_entity_type(), assert_setattr(configuration, 'entity_type'))),
+                Field('entity_id', False, Assertions(assert_str(), assert_setattr(configuration, 'entity_id'))),
+            ))(dumped_configuration, )
+        elif assert_str()(dumped_configuration, errors):
+            assert_setattr(configuration, 'entity_id')(dumped_configuration, errors)
+        return configuration
 
     def dump(self) -> DumpedConfigurationExport:
-        if self._entity_id is None:
+        if self.entity_type_is_constrained:
+            return void_none(self.entity_id)
+
+        if self.entity_type is None or self.entity_id is None:
             return Void
-        if self._entity_type_constraint is None:
-            if self._entity_type is None:
-                return Void
-            return {
-                'entity_type': get_entity_type_name(self._entity_type),
-                'entity_id': self._entity_id,
-            }
-        return self._entity_id
+
+        return {
+            'entity_type': get_entity_type_name(self._entity_type),
+            'entity_id': self._entity_id,
+        }
 
     @scope.register_self
     def __eq__(self, other) -> bool:
@@ -126,64 +101,22 @@ class EntityReference(Configuration):
         return self.entity_type == other.entity_type and self.entity_id == other.entity_id
 
 
-class EntityReferenceCollection(Configuration):
+class EntityReferenceSequence(ConfigurationSequence[EntityReference]):
     def __init__(self, entity_references: Optional[List[EntityReference]] = None, /, entity_type_constraint: Optional[Type[Entity]] = None):
-        super().__init__()
         self._entity_type_constraint = entity_type_constraint
-        self._entity_references = entity_references or []
+        super().__init__(entity_references)
 
-    @scope.register_self
-    def __iter__(self):
-        return (reference for reference in self._entity_references)
+    @classmethod
+    def _item_type(cls) -> Type[ConfigurationT]:
+        return EntityReference
 
-    @scope.register_self
-    def __len__(self) -> int:
-        return len(self._entity_references)
-
-    @property
-    def entity_type_constraint(self) -> Optional[Type[Entity]]:
-        return self._entity_type_constraint
-
-    def __getitem__(self, key):
-        return self._entity_references[key]
-
-    def __delitem__(self, key):
-        del self._entity_references[key]
-
-    def append(self, entity_reference: EntityReference) -> None:
+    def _on_add(self, entity_reference: EntityReference) -> None:
+        super()._on_add(entity_reference)
         if self._entity_type_constraint:
-            if entity_reference.entity_type != self._entity_type_constraint:
-                raise ConfigurationValidationError(_('The entity reference must be for an entity of type {expected_entity_type_name} ({expected_entity_type_label}), but instead is for an entity of type {actual_entity_type_name} ({actual_entity_type_label})').format(
-                    expected_entity_type_name=get_entity_type_name(self._entity_type_constraint),
-                    expected_entity_type_label=self._entity_type_constraint.entity_type_label() if issubclass(self._entity_type_constraint, UserFacingEntity) else get_entity_type_name(self._entity_type_constraint),
-                    actual_entity_type_name=get_entity_type_name(self._entity_type_constraint),
-                    actual_entity_type_label=self._entity_type_constraint.entity_type_label() if issubclass(self._entity_type_constraint, UserFacingEntity) else get_entity_type_name(self._entity_type_constraint),
+            if entity_reference.entity_type != self._entity_type_constraint or not entity_reference.entity_type_is_constrained:
+                raise ConfigurationValidationError(_('The entity reference must be constrained to {entity_type} entities.').format(
+                    entity_type=self._entity_type_constraint.entity_type_label() if issubclass(self._entity_type_constraint, UserFacingEntity) else get_entity_type_name(self._entity_type_constraint),
                 ))
-            entity_reference = EntityReference(None, entity_reference.entity_id, self._entity_type_constraint)
-        self._entity_references.append(entity_reference)
-        self.react.trigger()
-
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        if loader.assert_list(dumped_configuration):
-            loader.on_commit(self._entity_references.clear)
-            loader.assert_sequence(
-                dumped_configuration,
-                self._load_entity_reference,  # type: ignore
-            )
-
-    def _load_entity_reference(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        with loader.context() as errors:
-            entity_reference = EntityReference(entity_type_constraint=self._entity_type_constraint)
-            entity_reference.load(dumped_configuration, loader)
-            loader.on_commit(lambda: self._entity_references.append(entity_reference))
-        return errors.valid
-
-    def dump(self) -> DumpedConfigurationExport:
-        return minimize([
-            entity_reference.dump()
-            for entity_reference
-            in self._entity_references
-        ])
 
 
 class ExtensionConfiguration(Configuration):
@@ -225,60 +158,62 @@ class ExtensionConfiguration(Configuration):
     def extension_configuration(self) -> Optional[Configuration]:
         return self._extension_configuration
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        loader.assert_record(dumped_configuration, {
-            'enabled': Field(
-                False,
-                loader.assert_bool,  # type: ignore
-                lambda x: loader.assert_setattr(self, 'enabled', x),
-            ),
-            'configuration': Field(
-                False,
-                self._load_extension_configuration,  # type: ignore
-            ),
-        })
+    def update(self, other: Self) -> None:
+        raise NotImplementedError
 
-    def _load_extension_configuration(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        extension_type = self.extension_type
-        if issubclass(extension_type, ConfigurableExtension):
-            cast(ExtensionConfiguration, self.extension_configuration).load(dumped_configuration, loader)
-            return True
-        loader.error(ConfigurationValidationError(_('{extension_type} is not configurable.').format(
-            extension_type=extension_type.name(),
-        )))
-        return False
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        if not assert_field(Field('extension', True)):
+            return
+        configuration = cls(dumped_configuration['extension'])
+        assert_record(Fields(
+            Field('enabled', False, Assertions(assert_bool(), assert_setattr(configuration, 'enabled'))),
+            Field('configuration', False, Assertions(cls.configuration._assert_extension_configuration())),
+        ))(dumped_configuration, errors)
+        return configuration
+
+    @classmethod
+    def _assert_extension_configuration(cls, extension_type: Type[Extension]) -> ValueAssertion[Any, None]:
+        def _assertion(value: Any, errors: ConfigurationErrorCollection) -> None:
+            if issubclass(extension_type, ConfigurableExtension):
+                cast(ExtensionConfiguration, extension_type).load(value, errors)
+                return True
+            errors.append(ConfigurationValidationError(_('{extension_type} is not configurable.').format(
+                extension_type=extension_type.name(),
+            )))
+        return _assertion
 
     def dump(self) -> DumpedConfigurationExport:
         return minimize_dict({
+            'extension': self.extension_type,
             'enabled': self.enabled,
             'configuration': self.extension_configuration.dump() if issubclass(self.extension_type, Configurable) and self.extension_configuration else Void,
         }, True)
 
 
-class ExtensionConfigurationMap(ConfigurationMap[Type[Extension], ExtensionConfiguration]):
+class ExtensionConfigurationMapping(ConfigurationMapping[Type[Extension], ExtensionConfiguration]):
+    def __init__(self, configurations: Optional[Iterable[ExtensionConfiguration]] = None):
+        super().__init__(configurations, default_factory=ExtensionConfiguration)
+
     def _get_key(self, configuration: ExtensionConfiguration) -> Type[Extension]:
         return configuration.extension_type
 
-    def _load_key(self, dumped_configuration_key: str) -> Type[Extension]:
-        try:
-            return import_any(dumped_configuration_key)
-        except ImportError:
-            raise ConfigurationValidationError(_('{extension_type} is not a valid Betty extension.').format(
-                extension_type=dumped_configuration_key,
-            ))
+    @classmethod
+    def _load_key(cls, dumped_item: DumpedConfigurationImport, errors: ConfigurationErrorCollection, dumped_key: str) -> DumpedConfigurationImport:
+        if assert_dict()(dumped_item, errors):
+            dumped_item['extension'] = dumped_key
+            return dumped_item
 
-    def _dump_key(self, configuration_key: Type[Extension]) -> str:
-        return configuration_key.name()
-
-    def _default_configuration_item(self, configuration_key: Type[Extension]) -> ExtensionConfiguration:
-        return ExtensionConfiguration(configuration_key)
+    def _dump_key(self, dumped_item: DumpedConfigurationDict) -> Tuple[DumpedConfigurationExport, str]:
+        dumped_key = dumped_item.pop('extension')
+        return dumped_item, dumped_key
 
     def enable(self, *extension_types: Type[Extension]):
         for extension_type in extension_types:
             try:
                 self._configurations[extension_type].enabled = True
             except KeyError:
-                self.append(self._default_configuration_item(extension_type))
+                self.append(ExtensionConfiguration(extension_type, True))
 
     def disable(self, *extension_types: Type[Extension]):
         for extension_type in extension_types:
@@ -305,29 +240,31 @@ class EntityTypeConfiguration(Configuration):
     def entity_type(self) -> Type[Entity]:
         return self._entity_type
 
-    def _validate_generate_html_list(self, generate_html_list: Optional[bool]) -> Optional[bool]:
-        if generate_html_list and not issubclass(self._entity_type, UserFacingEntity):
-            raise ConfigurationValidationError('Cannot generate HTML pages for entity types that are not user-facing.')
-        return generate_html_list
-
     @reactive  # type: ignore
     @property
     def generate_html_list(self) -> bool:
         return self._generate_html_list or False
 
     @generate_html_list.setter
-    @validate(_validate_generate_html_list)
     def generate_html_list(self, generate_html_list: Optional[bool]) -> None:
+        if generate_html_list and not issubclass(self._entity_type, UserFacingEntity):
+            raise ConfigurationValidationError('Cannot generate HTML pages for entity types that are not user-facing.')
         self._generate_html_list = generate_html_list
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        loader.assert_record(dumped_configuration, {
-            'generate_html_list': Field(
-                False,
-                loader.assert_bool,  # type: ignore
-                lambda x: loader.assert_setattr(self, 'generate_html_list', x),
-            ),
-        })
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> Self:
+        # @todo We still have the problem of how to pass on primary keys to loaders. We purposefully extract them as part of the serialization
+        # @todo so they can become mapping keys.
+        # @todo Perhaps we can come up with a generic solution for that, transforming the key into a dictionary field as part of the parent collection's loading process
+        # @todo Items will then become reusable components, able to stand alone (with their primary key inside the dumped config), or as part of a collection,
+        # @todo with the primary key outside the dumped config, as a collection key.
+        # @todo
+        # @todo
+        configuration = cls()
+        loader.assert_record(dumped_configuration, (
+            Field('generate_html_list', False, (loader.assert_bool, loader.assert_setattr(configuration, 'generate_html_list'))),
+        ))
+        return configuration
 
     def dump(self) -> DumpedConfigurationExport:
         return minimize_dict({
@@ -335,22 +272,24 @@ class EntityTypeConfiguration(Configuration):
         }, True)
 
 
-class EntityTypeConfigurationMap(ConfigurationMap[Type[Entity], EntityTypeConfiguration]):
+class EntityTypeConfigurationMapping(ConfigurationMapping[Type[Entity], EntityTypeConfiguration]):
     def _get_key(self, configuration: EntityTypeConfiguration) -> Type[Entity]:
         return configuration.entity_type
 
-    def _load_key(self, dumped_configuration_key: str) -> Type[Entity]:
-        return get_entity_type(dumped_configuration_key)
+    def _load_key(self, dumped_configuration_key: str, errors: ConfigurationErrorCollection) -> Optional[Type[Entity]]:
+        return assert_entity_type()(dumped_configuration_key, errors)
 
     def _dump_key(self, configuration_key: Type[Entity]) -> str:
         return get_entity_type_name(configuration_key)
 
-    def _default_configuration_item(self, configuration_key: Type[Entity]) -> EntityTypeConfiguration:
-        return EntityTypeConfiguration(configuration_key)
+    @classmethod
+    def _item_type(cls) -> Type[EntityTypeConfiguration]:
+        return EntityTypeConfiguration
 
 
-class LocaleConfiguration:
-    def __init__(self, locale: str, alias: Optional[str] = None):
+class LocaleConfiguration(Configuration):
+    def __init__(self, locale: str, alias: Optional[str] = None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._locale = locale
         if alias is not None and '/' in alias:
             raise ConfigurationValidationError(_('Locale aliases must not contain slashes.'))
@@ -375,115 +314,83 @@ class LocaleConfiguration:
     def locale(self) -> str:
         return self._locale
 
+    @reactive
     @property
     def alias(self) -> str:
         if self._alias is None:
             return self.locale
         return self._alias
 
+    @alias.setter
+    def alias(self, alias: Optional[str]) -> None:
+        self._alias = alias
 
-class LocaleConfigurationCollection(Configuration):
-    def __init__(self, configurations: Optional[Sequence[LocaleConfiguration]] = None):
-        super().__init__()
-        self._configurations: OrderedDict[str, LocaleConfiguration] = OrderedDict()
-        self.replace(configurations)
+    def update(self, other: Self) -> None:
+        self.alias = other._alias
 
-    @scope.register_self
-    def __getitem__(self, locale: str) -> LocaleConfiguration:
-        return self._configurations[locale]
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        if locale := assert_field(Field('locale', True, Assertions(assert_str()))):
+            configuration = cls(cast(str, locale))
+            assert_record(Fields(
+                Field('locale', True, Assertions()),
+                Field('alias', False, Assertions(assert_str(), assert_setattr(configuration, 'alias'))),
+            ))(dumped_configuration, errors)
+            return configuration
 
-    def __delitem__(self, locale: str) -> None:
+    def dump(self) -> DumpedConfigurationExport:
+        return minimize_dict({
+            'locale': self.locale,
+            'alias': void_none(self._alias)
+        })
+
+
+class LocaleConfigurationMapping(ConfigurationMapping[str, LocaleConfiguration]):
+    def __init__(self, configurations: Optional[Iterable[LocaleConfiguration]] = None):
+        super().__init__(configurations)
+        if len(self) == 0:
+            self.append(LocaleConfiguration('en-US'))
+
+    def _get_key(self, locale: LocaleConfiguration) -> str:
+        return locale.locale
+
+    # @todo Add a KeyedConfigurationMapping(ConfigurationMapping) that implements _load_key() and _dump_key() and can alter error contexts.
+    # @todo However, for generic
+    # @todo
+    # @todo HOLD THE PRESSES
+    # @todo self._get_key()!!! ConfigurationMapping already assumes the key comes from the config. All good here!
+    # @todo
+    @classmethod
+    def _load_key(cls, dumped_item: DumpedConfigurationImport, errors: ConfigurationErrorCollection, dumped_key: str) -> DumpedConfigurationImport:
+        if assert_dict()(dumped_item):
+            dumped_item['locale'] = dumped_key
+        return dumped_item
+
+    def _dump_key(self, dumped_item: DumpedConfigurationExport) -> Tuple[DumpedConfigurationExport, str]:
+        locale = dumped_item.pop('locale')
+        return dumped_item, locale
+
+    @classmethod
+    def _item_type(cls) -> Type[LocaleConfiguration]:
+        return LocaleConfiguration
+
+    def _on_remove(self, locale: LocaleConfiguration) -> None:
         if len(self._configurations) <= 1:
-            raise ConfigurationValidationError(_('Cannot remove the last remaining locale {locale}').format(locale=Locale.parse(bcp_47_to_rfc_1766(locale)).get_display_name()))
-        del self._configurations[locale]
-        self.react.trigger()
-
-    @scope.register_self
-    def __iter__(self) -> Iterable[LocaleConfiguration]:
-        return (configuration for configuration in self._configurations.values())
-
-    @scope.register_self
-    def __len__(self) -> int:
-        return len(self._configurations)
-
-    @scope.register_self
-    def __eq__(self, other):
-        if not isinstance(other, LocaleConfigurationCollection):
-            return NotImplemented
-        return self._configurations == other._configurations
-
-    @scope.register_self
-    def __contains__(self, item):
-        return item in self._configurations
-
-    @scope.register_self
-    def __repr__(self):
-        return repr_instance(self, configurations=list(self._configurations.values()))
-
-    def add(self, configuration: LocaleConfiguration) -> None:
-        self._configurations[configuration.locale] = configuration
-        self.react.trigger()
-
-    def replace(self, configurations: Optional[Sequence[LocaleConfiguration]] = None) -> None:
-        self._configurations.clear()
-        if configurations is None or len(configurations) < 1:
-            configurations = [LocaleConfiguration('en-US')]
-        for configuration in configurations:
-            self._configurations[configuration.locale] = configuration
-        self.react.trigger()
+            raise ConfigurationValidationError(_('Cannot remove the last remaining locale {locale}').format(
+                locale=Locale.parse(bcp_47_to_rfc_1766(locale.locale)).get_display_name()),
+            )
 
     @reactive  # type: ignore
     @property
     def default(self) -> LocaleConfiguration:
-        return next(iter(self._configurations.values()))
+        return next(self.values())
 
     @default.setter
     def default(self, configuration: LocaleConfiguration) -> None:
+        # @todo Make sure this locale does not already exist. Then move it to the beginning.
         self._configurations[configuration.locale] = configuration
         self._configurations.move_to_end(configuration.locale, False)
         self.react.trigger()
-
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        loader.on_commit(self._configurations.clear)
-        loader.assert_sequence(
-            dumped_configuration,
-            self._load_locale,  # type: ignore
-        )
-
-    def _load_locale(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> TypeGuard[DumpedConfigurationDict[DumpedConfigurationImport]]:
-        if loader.assert_dict(dumped_configuration):
-            with loader.assert_required_key(
-                dumped_configuration,
-                'locale',
-                loader.assert_str,  # type: ignore
-            ) as (dumped_locale, valid):
-                if valid:
-                    try:
-                        parse_locale(
-                            bcp_47_to_rfc_1766(
-                                dumped_locale,  # type: ignore
-                            ),
-                        )
-                    except ValueError:
-                        loader.error(ConfigurationValidationError(_('{locale} is not a valid IETF BCP 47 language tag.').format(locale=dumped_locale)))
-                    else:
-                        loader.on_commit(lambda: self.add(LocaleConfiguration(
-                            dumped_locale,  # type: ignore
-                            dumped_configuration['alias'] if 'alias' in dumped_configuration else None,  # type: ignore
-                        )))
-                        return True
-        return False
-
-    def dump(self) -> DumpedConfigurationExport:
-        dumped_configuration = []
-        for locale_configuration in self:
-            dumped_locale_configuration = {
-                'locale': locale_configuration.locale,
-            }
-            if locale_configuration.alias != locale_configuration.locale:
-                dumped_locale_configuration['alias'] = locale_configuration.alias
-            dumped_configuration.append(dumped_locale_configuration)
-        return dumped_configuration
 
 
 class ProjectConfiguration(FileBasedConfiguration):
@@ -495,17 +402,17 @@ class ProjectConfiguration(FileBasedConfiguration):
         self._content_negotiation = False
         self._title = 'Betty'
         self._author: Optional[str] = None
-        self._entity_types = EntityTypeConfigurationMap([
+        self._entity_types = EntityTypeConfigurationMapping([
             EntityTypeConfiguration(Person, True),
             EntityTypeConfiguration(Event, True),
             EntityTypeConfiguration(Place, True),
             EntityTypeConfiguration(Source, True),
         ])
         self._entity_types.react(self)
-        self._extensions = ExtensionConfigurationMap()
+        self._extensions = ExtensionConfigurationMapping()
         self._extensions.react(self)
         self._debug = False
-        self._locales = LocaleConfigurationCollection()
+        self._locales = LocaleConfigurationMapping()
         self._locales.react(self)
         self._lifetime_threshold = 125
 
@@ -588,7 +495,7 @@ class ProjectConfiguration(FileBasedConfiguration):
 
     @reactive  # type: ignore
     @property
-    def locales(self) -> LocaleConfigurationCollection:
+    def locales(self) -> LocaleConfigurationMapping:
         return self._locales
 
     @property
@@ -596,11 +503,11 @@ class ProjectConfiguration(FileBasedConfiguration):
         return len(self.locales) > 1
 
     @property
-    def entity_types(self) -> EntityTypeConfigurationMap:
+    def entity_types(self) -> EntityTypeConfigurationMapping:
         return self._entity_types
 
     @property
-    def extensions(self) -> ExtensionConfigurationMap:
+    def extensions(self) -> ExtensionConfigurationMapping:
         return self._extensions
 
     @reactive  # type: ignore
@@ -618,91 +525,56 @@ class ProjectConfiguration(FileBasedConfiguration):
         return self._lifetime_threshold
 
     @lifetime_threshold.setter
-    @validate(validate_positive_number)
     def lifetime_threshold(self, lifetime_threshold: int) -> None:
+        if lifetime_threshold <= 0:
+            raise ConfigurationValidationError(_('This must be a positive number.'))
         self._lifetime_threshold = lifetime_threshold
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        loader.assert_record(
-            dumped_configuration,
-            {
-                'base_url': Field(
-                    True,
-                    loader.assert_str,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'base_url', x),
-                ),
-                'title': Field(
-                    False,
-                    loader.assert_str,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'title', x),
-                ),
-                'author': Field(
-                    False,
-                    loader.assert_str,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'author', x),
-                ),
-                'root_path': Field(
-                    False,
-                    loader.assert_str,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'root_path', x),
-                ),
-                'clean_urls': Field(
-                    False,
-                    loader.assert_bool,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'clean_urls', x),
-                ),
-                'content_negotiation': Field(
-                    False,
-                    loader.assert_bool,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'content_negotiation', x),
-                ),
-                'debug': Field(
-                    False,
-                    loader.assert_bool,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'debug', x),
-                ),
-                'lifetime_threshold': Field(
-                    False,
-                    loader.assert_int,  # type: ignore
-                    lambda x: loader.assert_setattr(self, 'lifetime_threshold', x),
-                ),
-                'locales': Field(
-                    False,
-                    self._locales.load,  # type: ignore
-                ),
-                'extensions': Field(
-                    False,
-                    self._extensions.load,  # type: ignore
-                ),
-                'entity_types': Field(
-                    False,
-                    self._entity_types.load,  # type: ignore
-                ),
-            },
-        )
+    def update(self, other: Self) -> None:
+        self.base_url = other.base_url
+        self.title = other.title
+        self.author = other.author
+        self.root_path = other.root_path
+        self.clean_urls = other.clean_urls
+        self.content_negotiation = other.content_negotiation
+        self.debug = other.debug
+        self.lifetime_threshold = other.lifetime_threshold
+        self.locales.update(other.locales)
+        self.extensions.update(other.extensions)
+        self.entity_types.update(other.entity_types)
+
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        configuration = cls()
+        assert_record(Fields(
+            Field('base_url', True, Assertions(assert_str(), assert_setattr(configuration, 'base_url'))),
+            Field('title', False, Assertions(assert_str(), assert_setattr(configuration, 'title'))),
+            Field('author', False, Assertions(assert_str(), assert_setattr(configuration, 'author'))),
+            Field('root_path', False, Assertions(assert_str(), assert_setattr(configuration, 'root_path'))),
+            Field('clean_urls', False, Assertions(assert_bool(), assert_setattr(configuration, 'clean_urls'))),
+            Field('content_negotiation', False, Assertions(assert_bool(), assert_setattr(configuration, 'content_negotiation'))),
+            Field('debug', False, Assertions(assert_bool(), assert_setattr(configuration, 'debug'))),
+            Field('lifetime_threshold', False, Assertions(assert_int(), assert_setattr(configuration, 'lifetime_threshold'))),
+            Field('locales', False, Assertions(configuration._locales.load)),
+            Field('extensions', False, Assertions(configuration._extensions.load)),
+            Field('entity_types', False, Assertions(configuration._entity_types.load)),
+        ))(dumped_configuration, errors)
+        return configuration
 
     def dump(self) -> DumpedConfigurationExport:
-        dumped_configuration = {
+        return minimize_dict({
             'base_url': self.base_url,
             'title': self.title,
-        }
-        if self.root_path is not None:
-            dumped_configuration['root_path'] = self.root_path
-        if self.clean_urls is not None:
-            dumped_configuration['clean_urls'] = self.clean_urls
-        if self.author is not None:
-            dumped_configuration['author'] = self.author
-        if self.content_negotiation is not None:
-            dumped_configuration['content_negotiation'] = self.content_negotiation
-        if self.debug is not None:
-            dumped_configuration['debug'] = self.debug
-        dumped_configuration['locales'] = self.locales.dump()
-        dumped_configuration['extensions'] = self.extensions.dump()
-        dumped_configuration['entity_types'] = self.entity_types.dump()
-        if self.lifetime_threshold is not None:
-            dumped_configuration['lifetime_threshold'] = self.lifetime_threshold
-
-        return minimize(dumped_configuration)
+            'root_path': void_none(self.root_path),
+            'clean_urls': void_none(self.clean_urls),
+            'author': void_none(self.author),
+            'content_negotiation': void_none(self.content_negotiation),
+            'debug': void_none(self.debug),
+            'lifetime_threshold': void_none(self.lifetime_threshold),
+            'locales': self.locales.dump(),
+            'extensions': self.extensions.dump(),
+            'entity_types': self.entity_types.dump(),
+        }, True)
 
 
 class Project(Configurable[ProjectConfiguration]):

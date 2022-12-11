@@ -12,15 +12,18 @@ import aiohttp
 from babel.core import parse_locale
 from babel.localedata import locale_identifiers
 from jinja2 import Environment as Jinja2Environment
-from reactives import reactive
+from reactives import reactive, scope
 from reactives.factory.type import ReactiveInstance
 
 from betty.app.extension import ListExtensions, Extension, Extensions, build_extension_type_graph, \
     CyclicDependencyError, ExtensionDispatcher, ConfigurableExtension, discover_extension_types
 from betty.asyncio import sync
 from betty.concurrent import ExceptionRaisingAwaitableExecutor
-from betty.config import FileBasedConfiguration, DumpedConfigurationImport, Configurable, DumpedConfigurationExport
-from betty.config.load import ConfigurationValidationError, Loader, Field
+from betty.config import FileBasedConfiguration, DumpedConfigurationImport, Configurable, DumpedConfigurationExport, \
+    minimize_dict, ConfigurationErrorCollection
+from betty.config.dump import void_none
+from betty.config.load import ConfigurationValidationError, Field, Assertions, assert_str, assert_setattr, \
+    assert_record, Fields
 from betty.dispatch import Dispatcher
 from betty.fs import FileSystem, ASSETS_DIRECTORY_PATH, HOME_DIRECTORY_PATH
 from betty.locale import negotiate_locale, TranslationsRepository, Translations, rfc_1766_to_bcp_47, bcp_47_to_rfc_1766
@@ -88,24 +91,25 @@ class AppConfiguration(FileBasedConfiguration):
         try:
             parse_locale(bcp_47_to_rfc_1766(locale))
         except ValueError:
-            raise ConfigurationValidationError(_('{locale} is not a valid IETF BCP 47 language tag.').format(locale=locale))
+            raise ConfigurationValidationError(_('"{locale}" is not a valid IETF BCP 47 language tag.').format(locale=locale))
         self._locale = locale
 
-    def load(self, dumped_configuration: DumpedConfigurationImport, loader: Loader) -> None:
-        loader.assert_record(dumped_configuration, {
-            'locale': Field(
-                True,
-                loader.assert_str,  # type: ignore
-                lambda x: loader.assert_setattr(self, 'locale', x),
-            ),
-        })
+    def update(self, other: Self) -> None:
+        with scope.suspend():
+            self.locale = other.locale
+
+    @classmethod
+    def load(cls, dumped_configuration: DumpedConfigurationImport, errors: ConfigurationErrorCollection) -> Optional[Self]:
+        configuration = cls()
+        assert_record(Fields(
+            Field('locale', True, Assertions(assert_str(), assert_setattr(configuration, 'locale'))),
+        ))(dumped_configuration, errors)
+        return configuration
 
     def dump(self) -> DumpedConfigurationExport:
-        dumped_configuration = {}
-        if self._locale is not None:
-            dumped_configuration['locale'] = self.locale
-
-        return dumped_configuration
+        return minimize_dict({
+            'locale': void_none(self.locale)
+        }, True)
 
 
 @reactive
@@ -174,18 +178,14 @@ class App(Configurable[AppConfiguration], ReactiveInstance):
         self._acquired = False
 
     @contextmanager
-    def acquire_locale(self, *requested_locales: str) -> Iterator[Self]:  # type: ignore
+    def acquire_locale(self, *requested_locales: Optional[str]) -> Iterator[Self]:  # type: ignore
         """
         Temporarily change this application's locale and the global gettext translations.
         """
+        requested_locales = tuple(requested_locale for requested_locale in requested_locales if requested_locale is not None)
         if not requested_locales:
-            requested_locales = (self.configuration.locale,)
-        requested_locales = (*[
-            requested_locale
-            for requested_locale
-            in requested_locales
-            if requested_locale
-        ], 'en-US')
+            requested_locales = () if self.configuration.locale is None else (self.configuration.locale,)
+        requested_locales = (*requested_locales, 'en-US')
 
         negotiated_locale = negotiate_locale(
             requested_locales,
@@ -244,7 +244,7 @@ class App(Configurable[AppConfiguration], ReactiveInstance):
 
     def _update_extensions(self) -> None:
         extension_types_enabled_in_configuration = set()
-        for app_extension_configuration in self.project.configuration.extensions:
+        for app_extension_configuration in self.project.configuration.extensions.values():
             if app_extension_configuration.enabled:
                 app_extension_configuration.extension_type.enable_requirement().assert_met()
                 extension_types_enabled_in_configuration.add(app_extension_configuration.extension_type)
