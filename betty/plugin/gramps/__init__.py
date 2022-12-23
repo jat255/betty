@@ -2,8 +2,10 @@ import gzip
 import logging
 import re
 import tarfile
+import pathlib
 from contextlib import suppress
 from os import path
+import shutil
 from tempfile import TemporaryDirectory
 from typing import Tuple, Optional, List, Any
 from xml.etree import ElementTree
@@ -11,6 +13,7 @@ from xml.etree import ElementTree
 from geopy import Point
 from voluptuous import Schema, IsFile, All
 
+from betty import _CACHE_DIRECTORY_PATH
 from betty.ancestry import Ancestry, Place, File, Note, PersonName, Presence, PlaceName, Person, Link, HasFiles, \
     HasLinks, HasCitations, IdentifiableEvent, HasPrivacy, IdentifiableSource, IdentifiableCitation, Subject, Witness, \
     Attendee, Birth, Baptism, Adoption, Cremation, Death, Burial, Engagement, Marriage, MarriageAnnouncement, Divorce, \
@@ -55,7 +58,7 @@ def parse_gramps(site: Site, gramps: str) -> None:
     try:
         with gzip.open(gramps) as f:
             xml = f.read()
-        parse_xml(site, xml, rootname(gramps))
+        parse_xml(site, xml, pathlib.Path(gramps).parent)
     except OSError:
         raise GrampsParseFileError()
 
@@ -211,6 +214,12 @@ def _parse_object(ancestry: _IntermediateAncestry, element: ElementTree.Element,
     entity_id = element.get('id')
     file_element = _xpath1(element, './ns:file')
     file_path = path.join(gramps_tree_directory_path, file_element.get('src'))
+    
+    # copy file to cache
+    dst_dir = pathlib.Path(_CACHE_DIRECTORY_PATH) / 'files'
+    dst_dir.mkdir(exist_ok=True)
+    file_path = shutil.copy(file_path, dst_dir)
+
     file = File(entity_id, file_path)
     file.media_type = MediaType(file_element.get('mime'))
     description = file_element.get('description')
