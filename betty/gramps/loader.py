@@ -73,9 +73,10 @@ def load_gramps(ancestry: Ancestry, gramps_path: PathLike) -> None:
         load_xml(
             ancestry,
             xml,  # type: ignore
-            rootname(gramps_path),
+            Path(gramps_path).parent,
+            # rootname(gramps_path),
         )
-    except OSError:
+    except OSError as e:
         raise GrampsLoadFileError()
 
 
@@ -98,7 +99,7 @@ def load_gpkg(ancestry: Ancestry, gpkg_path: PathLike) -> None:
 def load_xml(ancestry: Ancestry, xml: Union[str, PathLike], gramps_tree_directory_path: PathLike) -> None:
     gramps_tree_directory_path = Path(gramps_tree_directory_path).resolve()
     with suppress(FileNotFoundError, OSError):
-        with open(xml) as f:
+         with open(xml) as f:
             xml = f.read()
     try:
         tree = ElementTree.ElementTree(ElementTree.fromstring(

@@ -4,9 +4,11 @@ from contextlib import suppress
 from functools import total_ordering
 from pathlib import Path
 from typing import List, Optional, Set, TYPE_CHECKING, Iterable, Any
+import shutil
 
 from geopy import Point
 
+from betty.fs import CACHE_DIRECTORY_PATH
 from betty.locale import Localized, Datey
 from betty.media_type import MediaType
 from betty.model import many_to_many, Entity, one_to_many, many_to_one, many_to_one_to_many, \
@@ -144,7 +146,12 @@ class HasCitations(EntityVariation):
 class File(Described, HasPrivacy, HasMediaType, HasNotes, HasCitations, UserFacingEntity, Entity):
     def __init__(self, file_id: Optional[str], path: PathLike, media_type: Optional[MediaType] = None, *args, **kwargs):
         super().__init__(file_id, *args, **kwargs)
-        self._path = Path(path)
+
+        # copy file from tmp path to cache dir
+        dst_dir = Path(CACHE_DIRECTORY_PATH) / 'files'
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        self._path = Path(shutil.copy(path, dst_dir)).resolve()     
+
         self.media_type = media_type
 
     @property

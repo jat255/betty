@@ -32,7 +32,7 @@ function Search () {
   })
 
   // Allow navigation into and out of the search.
-  fetch('/search-configuration.json')
+  fetch('/ancestry/search-configuration.json')
     .then(function (response) {
       return response.json()
     })

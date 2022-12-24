@@ -21,6 +21,7 @@ class Maps(UserFacingExtension, CssProvider, JsProvider, Generator, NpmBuilder):
         return {_Npm}
 
     async def npm_build(self, working_directory_path: Path, assets_directory_path: Path) -> None:
+        logging.getLogger().info('Building the interactive maps.')
         await self.app.extensions[_Npm].install(type(self), working_directory_path)
         await npm(('run', 'webpack'), cwd=working_directory_path)
         self._copy_npm_build(working_directory_path / 'webpack-build', assets_directory_path)

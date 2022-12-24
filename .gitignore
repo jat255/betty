@@ -18,3 +18,7 @@
 /.coverage
 /cypress/screenshots
 /cypress/app
+
+.venv/
+.python-version
+.vscode/

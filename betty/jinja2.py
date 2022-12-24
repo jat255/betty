@@ -397,6 +397,8 @@ def _execute_filter_image_image(file_path: Path, *args, **kwargs) -> None:
         image = Image.open(file_path)
     try:
         _execute_filter_image(image, file_path, *args, **kwargs)
+    except Exception as e:
+        pass
     finally:
         image.close()
 
@@ -419,13 +421,13 @@ def _execute_filter_image(image: Image, file_path: Path, cache_directory_path: P
 
     try:
         link_or_copy(cache_file_path, destination_file_path)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         cache_directory_path.mkdir(exist_ok=True, parents=True)
         with image:
             if width is not None:
-                width = min(width, image.window_width)
+                width = min(width, image.width)
             if height is not None:
-                height = min(height, image.window_height)
+                height = min(height, image.height)
 
             if width is None:
                 size = height
